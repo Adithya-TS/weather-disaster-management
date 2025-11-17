@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  weather-disaster-adk:
+    build: .
+    container_name: weather-disaster-adk
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENWEATHER_API_KEY=${OPENWEATHER_API_KEY}
+      - CITIES=${CITIES:-London,Karachi,New York}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    restart: unless-stopped
+
