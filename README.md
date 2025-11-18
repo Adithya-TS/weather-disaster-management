@@ -1,184 +1,188 @@
-# Weather Disaster Management System - Google ADK Implementation
+# Weather Disaster Management – Google ADK Agentic Flow
 
-## Overview
-This project implements the Weather Disaster Management AI Agent using **Google Agent Development Kit (ADK)**, incorporating advanced multi-agent patterns, tools, memory management, and observability.
+This repository contains a full Google Agent Development Kit (ADK) implementation of a weather-driven disaster-response assistant. The orchestrator coordinates specialized sub-agents, each backed by deterministic tool calls and human-in-the-loop checkpoints, to move from city-level situational awareness to verified emergency alerts.
 
-## Key Concepts Implemented
+---
 
-### 1. Multi-Agent System ✅
-- **Sequential Agents**: Weather data retrieval → Disaster analysis → Severity assessment → Response generation
-- **Parallel Agents**: Simultaneous weather API calls and social media monitoring
-- **Loop Agents**: Continuous monitoring with scheduled checks
+## Stack at a Glance
+- **LLM Runtime**: Google ADK `Runner` hosting Gemini `LlmAgent` instances.
+- **Agents**: Sequential root coordinator plus specialist sub-agents (data collection, analysis, planning, human verification, alerting).
+- **Tools**: Custom weather/social data fetchers, disaster reasoning, response planning, notification simulators, MCP service shims (`src/tools/custom_tools.py`, `src/tools/mcp_integration.py`).
+- **State & Memory**: ADK `InMemorySessionService` wrapped by `StateManager` for workflow sessions (`src/memory/session_memory.py`).
+- **Observability**: Structured logging + ADK `LoggingPlugin` via `ObservabilityManager` (`src/observability/monitoring.py`).
+- **Evaluation**: Scenario accuracy, response quality, and performance benchmarking (`src/evaluation/agent_evaluation.py`).
 
-### 2. Tools Integration ✅
-- **Custom Tools**: Weather API integration, Email alerting, Data logging
-- **MCP (Model Context Protocol)**: External service integration for weather services
-- **Built-in Tools**: Google Search for disaster information, Code Execution for data processing
+---
 
-### 3. Sessions & Memory ✅
-- **InMemorySessionService**: Manages conversation and workflow state
-- **Memory Bank**: Long-term storage of disaster events and patterns
-- **Context Engineering**: Context compaction for efficient processing
-
-### 4. Observability ✅
-- **Logging**: Comprehensive logging of all agent actions
-- **Tracing**: End-to-end tracing of agent workflows
-- **Metrics**: Performance metrics for agent execution times and success rates
-
-### 5. Agent Evaluation ✅
-- Automated testing of disaster detection accuracy
-- Response quality evaluation
-- Performance benchmarking
-
-### 6. Long-Running Operations ✅
-- Pause/Resume capability for human verification workflows
-- Persistent state across sessions
-
-### 7. Agent Deployment ✅
-- Docker containerization
-- Cloud deployment configuration
-- API endpoints for external integration
-
-## Project Structure
+## Repository Layout
 ```
-weather-disaster-adk/
+weather-disaster-management/
 ├── src/
-│   ├── agents/              # Multi-agent implementations
-│   ├── tools/               # Custom tools and MCP integrations
-│   ├── memory/              # Session and memory management
-│   ├── observability/       # Logging, tracing, metrics
-│   ├── evaluation/          # Agent evaluation framework
-│   └── utils/               # Utility functions
-├── config/                  # Configuration files
-├── tests/                   # Test suites
-├── deployment/              # Deployment configurations
-├── requirements.txt         # Python dependencies
-├── pyproject.toml          # Project configuration
-└── README.md               # This file
+│   ├── agents/            # Multi-agent graph definitions (new + legacy)
+│   ├── tools/             # ADK-compliant tool functions + MCP shims
+│   ├── memory/            # Session + workflow state helpers
+│   ├── observability/     # Logging + plugin wiring
+│   └── evaluation/        # Automated agent test harness
+├── tests/                 # Pytest suites (workflow + ADK compliance)
+├── requirements.txt       # Runtime dependencies
+├── Weather_Disaster_Management_AI_AGENT.ipynb  # Walkthrough notebook
+└── README.md              # You are here
 ```
 
-## Installation
+---
+
+## Agentic Flow (end-to-end)
+1. **User Intent**: `WorkflowExecutor` (`src/main.py`) creates a Gemini prompt like “Analyze and respond to weather disaster situation in Miami" and streams it into ADK `Runner`.
+2. **Root Coordinator**: `root_disaster_management_agent` enforces the ordered workflow (`src/agents/multi_agent_system.py`):
+   - Transfer → `disaster_analyzer_agent`
+   - Transfer → `response_planner_agent`
+   - Transfer → `verification_agent`
+   - Transfer → `alert_agent`
+3. **Analysis Stage**: `disaster_analyzer_agent` fans out to tool-powered sub-agents:
+   - `weather_data_agent` uses `get_weather_data` (OpenWeatherMap) for live telemetry.
+   - `social_media_agent` synthesizes context-aware citizen reports.
+   - Tool `analyze_disaster_type` fuses both feeds into a typed/severity-ranked incident.
+4. **Response Planning**: `response_planner_agent` calls `generate_response_plan`, producing severity-specific, time-bound checklists covering resources, timelines, and authorities.
+5. **Human Verification**: `verification_agent` simulates escalation via `verify_with_human`, ensuring high-severity plans auto-approve while logging reviewer metadata.
+6. **Alert Execution**: `alert_agent` calls `send_emergency_alerts` to broadcast across predefined channels and returns the final confirmation to the coordinator.
+7. **Observability & Memory**:
+   - `ObservabilityManager` writes structured logs + offers ADK `LoggingPlugin` hooks.
+   - `StateManager` persists conversation transcripts inside `InMemorySessionService`.
+8. **Result Delivery**: Final Gemini response string aggregates the entire workflow summary; `WorkflowExecutor` prints success, duration, and log file path.
+
+---
+
+## Tooling & Integrations
+- **Live data**: `get_weather_data` hits OpenWeatherMap with retry-aware logging. Configure `OPENWEATHER_API_KEY`.
+- **Synthetic signals**: `get_social_media_reports` mirrors real weather conditions to prevent conflicting narratives.
+- **Reasoning utilities**: `analyze_disaster_type`, `generate_response_plan`, `verify_with_human`, `send_emergency_alerts` encode domain logic for deterministic steps.
+- **Model Context Protocol (MCP)**: `src/tools/mcp_integration.py` shows how to wrap additional services (context fetch, multi-channel notification, data aggregation) should you need to extend the pipeline beyond built-in tools.
+
+---
+
+## Observability & Evaluation
+- `ObservabilityManager` configures structlog sinks (console + rotating JSON files under `logs/`) and exposes an ADK `LoggingPlugin` so every agent event is traced automatically.
+- `src/evaluation/agent_evaluation.py` provides:
+  - **DisasterDetectionEvaluator**: golden scenarios (hurricane, flood, heatwave, no-threat) for regression checks.
+  - **ResponseQualityEvaluator**: heuristic scores for specificity/actionability/completeness/clarity.
+  - **PerformanceBenchmark**: throughput + latency stats over repeated executions.
+
+---
+
+## Prerequisites
+1. Python 3.10+
+2. Google API access with Gemini enabled.
+3. OpenWeatherMap API key.
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On macOS/Linux
-
-# Install dependencies
+python -m venv .venv
+. .venv/Scripts/activate    # PowerShell
 pip install -r requirements.txt
 ```
 
-## Configuration
-
-Create a `.env` file:
-```env
-GOOGLE_API_KEY=your_gemini_api_key
-OPENWEATHER_API_KEY=your_openweather_api_key
-SENDER_EMAIL=your_email@gmail.com
-EMAIL_PASSWORD=your_app_password
-RECEIVER_EMAIL=recipient@gmail.com
+Create `.env` (or export values):
+```
+GOOGLE_API_KEY=your_gemini_key
+OPENWEATHER_API_KEY=your_openweather_key
+LOG_LEVEL=INFO              # optional
+DEMO_CITY=Miami             # optional default for CLI demo
 ```
 
-## Usage
+---
 
-### Run the Complete System
+## Run the Workflow
 ```bash
-python src/main.py
+python -m src.main          # uses DEMO_CITY or defaults to Miami
 ```
+What you get:
+- Console banner describing the target city.
+- Structured logs in `logs/disaster_management_*.log`.
+- Final status block including agent response text.
 
-### Run with Evaluation
+To run inside notebooks, open `Weather_Disaster_Management_AI_AGENT.ipynb` and execute the cells (helpful for interactive demos).
+
+### FastAPI REST API
+Spin up the HTTP API to access all functionality remotely:
 ```bash
-python src/main.py --evaluate
+uvicorn src.api.fastapi_app:app --reload
 ```
+Access interactive API docs at: `http://localhost:8000/docs`
 
-### Run Specific Scenario
+#### System Endpoints
+- **`GET /healthz`** – Health check probe
+- **`GET /api/v1/status`** – Get system status and agent information
+
+#### Tool Endpoints (Individual Components)
+- **`GET /api/v1/weather/{city}`** – Get real-time weather data for a city
+- **`GET /api/v1/social-media/{city}`** – Get social media reports for a city
+- **`POST /api/v1/analyze`** – Analyze disaster type and severity
+  ```json
+  {
+    "city": "Miami",
+    "weather_data": "optional pre-fetched data",
+    "social_reports": "optional pre-fetched reports"
+  }
+  ```
+- **`POST /api/v1/plan`** – Generate disaster response plan
+  ```json
+  {
+    "disaster_type": "Hurricane",
+    "severity": "Critical",
+    "city": "Miami"
+  }
+  ```
+- **`POST /api/v1/verify`** – Verify response plan (human-in-the-loop)
+  ```json
+  {
+    "response_plan": "plan text here"
+  }
+  ```
+- **`POST /api/v1/alerts`** – Send emergency alerts
+  ```json
+  {
+    "response_plan": "plan text here",
+    "channels": ["email", "sms", "push"]
+  }
+  ```
+
+#### Workflow Endpoints (Full Agentic Flow)
+- **`POST /api/v1/disaster-response`** – Execute complete workflow
+  ```json
+  {
+    "city": "Miami"
+  }
+  ```
+  Returns: `{success, city, session_id, response, duration, timestamp}`
+
+#### Session Management
+- **`GET /api/v1/sessions`** – List sessions (with limit query param)
+- **`GET /api/v1/sessions/{session_id}`** – Get session details and history
+
+#### Evaluation Endpoints
+- **`POST /api/v1/evaluate`** – Run complete evaluation suite
+- **`GET /api/v1/evaluate/benchmark`** – Run performance benchmark only
+
+---
+
+## Testing & Evaluation
 ```bash
-python src/main.py --city "London" --scenario "high"
+pytest                      # runs test_simple_workflow.py, test_disaster_scenarios.py, etc.
 ```
+For deeper agent scoring, instantiate `EvaluationSuite` and call `run_full_evaluation()` with your executor to capture accuracy + throughput metrics.
 
-## Architecture
+---
 
-### Agent Flow
-1. **Data Collection Agent** (Parallel execution)
-   - Weather API Agent
-   - Social Media Monitoring Agent
+## Extending the System
+- **Add new data feeds**: implement ADK tool wrappers in `src/tools/custom_tools.py` or plug new MCP services into `src/tools/mcp_integration.py`.
+- **Customize flow**: edit `src/agents/multi_agent_system.py` to change or reorder sub-agents, or add conditional branching.
+- **Persist sessions**: swap `InMemorySessionService` with a durable ADK-compatible backend in `src/memory/session_memory.py`.
+- **Deploy**: use the included `Dockerfile`/`docker-compose.yml` or adapt to your infra; the app only depends on ADK-compatible secrets and network access for tools.
 
-2. **Analysis Agent** (Sequential)
-   - Disaster Type Classifier
-   - Severity Assessor
+---
 
-3. **Response Generator Agent** (Conditional routing)
-   - Emergency Response
-   - Civil Defense Response
-   - Public Works Response
+## Troubleshooting
+- Missing API keys → tools return human-readable error strings that bubble up through agents.
+- Long latency → adjust `retry_config` or Gemini model (`gemini-2.5-flash-lite` by default).
+- Need richer logging → set `LOG_LEVEL=DEBUG` and inspect the generated log file referenced in the CLI output.
 
-4. **Verification & Alert Agent** (Long-running with pause/resume)
-   - Human Verification (for low/medium severity)
-   - Email Alert Dispatcher
-
-5. **Monitoring Loop Agent**
-   - Scheduled checks
-   - Continuous monitoring
-
-## Features Demonstration
-
-### Multi-Agent Coordination
-- Agents communicate through shared state
-- Parallel execution for efficiency
-- Sequential processing for dependent tasks
-
-### Tool Usage
-- Custom weather API tool with retry logic
-- MCP integration for external services
-- Google Search for disaster research
-
-### Memory Management
-- Session persistence across runs
-- Historical disaster pattern analysis
-- Context-aware decision making
-
-### Observability
-- Structured logging with context
-- Distributed tracing
-- Real-time metrics dashboard
-
-### Evaluation
-- Automated accuracy testing
-- Response quality scoring
-- Performance benchmarking
-
-## Testing
-
-```bash
-# Run all tests
-pytest tests/
-
-# Run specific test suite
-pytest tests/test_agents.py
-
-# Run with coverage
-pytest --cov=src tests/
-```
-
-## Deployment
-
-### Docker
-```bash
-docker build -t weather-disaster-adk .
-docker run -p 8080:8080 weather-disaster-adk
-```
-
-### Cloud Run (GCP)
-```bash
-gcloud run deploy weather-disaster-adk \
-  --source . \
-  --platform managed \
-  --region us-central1
-```
-
-## License
-MIT License
-
-## Author
-Adithya - Google ADK Implementation
-Original LangGraph Version by Asif
+Happy building! The codebase is intentionally modular so you can reuse the agents, tools, and observability scaffolding for other ADK projects.

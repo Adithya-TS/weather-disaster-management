@@ -161,7 +161,8 @@ def get_social_media_reports(city: str, context: str = "") -> str:
         ]
     
     logger.info("social_media_tool.success", city=city, report_count=len(reports))
-    return f"Social Media Reports for {city}:\n" + "\n".join(reports)
+    current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    return f"Social Media Reports for {city} (Collected on: {current_date}):\n" + "\n".join(reports)
 
 
 def analyze_disaster_type(weather_data: str, social_reports: str) -> str:
