@@ -13,15 +13,15 @@ export const useWorkflow = () => {
   const [workflowState, setWorkflowState] = useState(null);
 
   const executeWorkflow = useCallback(
-    async (city, options = {}) => {
+    async (location, options = {}) => {
       const { onSuccess, onError } = options;
 
       try {
         const result = await execute(
-          () => apiService.executeWorkflow({ city }),
+          () => apiService.executeWorkflow(location),
           {
             showSuccessToast: true,
-            successMessage: `Workflow executed successfully for ${city}`,
+            successMessage: `Workflow executed successfully for ${location}`,
             onSuccess: (data) => {
               setWorkflowState(data);
               if (data.session_id) {
@@ -46,8 +46,8 @@ export const useWorkflow = () => {
   );
 
   const getWeather = useCallback(
-    async (city) => {
-      return execute(() => apiService.getWeather(city), {
+    async (location, startDate, endDate) => {
+      return execute(() => apiService.getWeather(location, startDate, endDate), {
         showSuccessToast: false,
       });
     },
@@ -55,8 +55,8 @@ export const useWorkflow = () => {
   );
 
   const getSocialMedia = useCallback(
-    async (city) => {
-      return execute(() => apiService.getSocialMedia(city), {
+    async (location) => {
+      return execute(() => apiService.getSocialMedia(location), {
         showSuccessToast: false,
       });
     },

@@ -107,14 +107,14 @@ class ObservabilityManager:
         """Get the current log file path."""
         return self.log_file
     
-    def log_workflow_start(self, city: str, **kwargs):
+    def log_workflow_start(self, location: str, **kwargs):
         """Log workflow start event."""
-        self.logger.info("workflow.start", city=city, **kwargs)
+        self.logger.info("workflow.start", location=location, **kwargs)
     
-    def log_workflow_complete(self, city: str, duration: float, **kwargs):
+    def log_workflow_complete(self, location: str, duration: float, **kwargs):
         """Log workflow completion event."""
-        self.logger.info("workflow.complete", city=city, duration_seconds=duration, **kwargs)
+        self.logger.info("workflow.complete", location=location, duration_seconds=duration, **kwargs)
     
-    def log_workflow_error(self, city: str, error: str, **kwargs):
+    def log_workflow_error(self, location: str, error: str, **kwargs):
         """Log workflow error event."""
-        self.logger.error("workflow.error", city=city, error=error, **kwargs)
+        self.logger.error("workflow.error", location=location, error=error, **kwargs)

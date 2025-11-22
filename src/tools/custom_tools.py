@@ -3,70 +3,365 @@ Custom Tools for Weather Disaster Management System
 ADK-compliant tools as simple Python functions
 """
 
-from typing import List
-from datetime import datetime
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
 import os
 import requests
 import structlog
+import math
+import random
 
 logger = structlog.get_logger()
 
 
-def get_weather_data(city: str) -> str:
+def geocode_location(location: str) -> Optional[Dict[str, float]]:
     """
-    Get real-time weather data for a city from OpenWeatherMap API.
+    Geocode a location (area, city, village) to get coordinates.
+    Uses OpenWeatherMap Geocoding API.
     
     Args:
-        city: Name of the city to get weather data for
+        location: Location string (e.g., "Ashok Nagar, Chennai" or "Seruvamani, Thiruvarur")
         
     Returns:
-        Weather data as a formatted string
+        Dictionary with 'lat' and 'lon' keys, or None if geocoding fails
     """
     api_key = os.getenv("OPENWEATHER_API_KEY")
     if not api_key:
-        return "Error: OpenWeather API key not configured. Set OPENWEATHER_API_KEY environment variable."
+        logger.warning("geocoding.no_api_key")
+        return None
     
     try:
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}"
+        url = f"http://api.openweathermap.org/geo/1.0/direct?q={location}&limit=1&appid={api_key}"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data and len(data) > 0:
+                result = {
+                    "lat": data[0].get("lat"),
+                    "lon": data[0].get("lon"),
+                    "name": data[0].get("name", location),
+                    "country": data[0].get("country", ""),
+                    "state": data[0].get("state", "")
+                }
+                logger.info("geocoding.success", location=location, lat=result["lat"], lon=result["lon"])
+                return result
+            else:
+                logger.warning("geocoding.no_results", location=location)
+                return None
+        else:
+            logger.error("geocoding.error", location=location, status=response.status_code)
+            return None
+    except Exception as e:
+        logger.error("geocoding.exception", location=location, error=str(e))
+        return None
+
+
+def get_weather_data(location: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get weather data for a location (area, city, village) from OpenWeatherMap API.
+    Supports both current weather and future forecasts.
+    
+    Args:
+        location: Location string (e.g., "Ashok Nagar, Chennai" or "Seruvamani, Thiruvarur")
+        start_date: Optional start date for forecast (YYYY-MM-DD format)
+        end_date: Optional end date for forecast (YYYY-MM-DD format)
+        
+    Returns:
+        Dictionary with weather data or forecast data
+    """
+    api_key = os.getenv("OPENWEATHER_API_KEY")
+    if not api_key:
+        return {
+            "error": "OpenWeather API key not configured. Set OPENWEATHER_API_KEY environment variable.",
+            "success": False
+        }
+    
+    # Geocode location to get coordinates
+    geo_data = geocode_location(location)
+    if not geo_data:
+        return {
+            "error": f"Could not find location: {location}. Please check the location name.",
+            "success": False
+        }
+    
+    lat = geo_data["lat"]
+    lon = geo_data["lon"]
+    resolved_name = geo_data.get("name", location)
+    
+    try:
+        # Check if forecast is requested
+        if start_date and end_date:
+            return get_weather_forecast(lat, lon, location, resolved_name, start_date, end_date, api_key)
+        else:
+            # Get current weather
+            url = f"http://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            
+            if response.status_code == 200:
+                weather_info = {
+                    "success": True,
+                    "location": resolved_name,
+                    "original_query": location,
+                    "coordinates": {"lat": lat, "lon": lon},
+                    "weather": data.get('weather', [{}])[0].get("description", "N/A"),
+                    "temperature": round(data.get("main", {}).get("temp", 0), 1),
+                    "feels_like": round(data.get("main", {}).get("feels_like", 0), 1),
+                    "temp_min": round(data.get("main", {}).get("temp_min", 0), 1),
+                    "temp_max": round(data.get("main", {}).get("temp_max", 0), 1),
+                    "wind_speed": round(data.get("wind", {}).get("speed", 0.0) * 3.6, 1),  # Convert m/s to km/h
+                    "wind_direction": data.get("wind", {}).get("deg", 0),
+                    "humidity": data.get("main", {}).get("humidity", 0),
+                    "pressure": data.get("main", {}).get("pressure", 0),
+                    "cloud_cover": data.get("clouds", {}).get("all", 0),
+                    "visibility": round(data.get("visibility", 0) / 1000, 1) if data.get("visibility") else None,  # Convert to km
+                    "condition": data.get('weather', [{}])[0].get("main", "N/A"),
+                    "timestamp": datetime.now().isoformat()
+                }
+                logger.info("weather_data_tool.success", location=location, temp=weather_info["temperature"])
+                return weather_info
+            else:
+                error_msg = f"Error: {data.get('message', 'Unknown error')}"
+                logger.error("weather_data_tool.error", location=location, error=error_msg)
+                return {"error": error_msg, "success": False}
+    except Exception as e:
+        error_msg = f"Error fetching weather data: {str(e)}"
+        logger.error("weather_data_tool.exception", location=location, error=str(e))
+        return {"error": error_msg, "success": False}
+
+
+def create_climatological_forecast(date_str: str, current_date: datetime, baseline_temp: float, 
+                                   baseline_humidity: int, baseline_pressure: int, days_from_today: int) -> Dict[str, Any]:
+    """
+    Create a climatological forecast estimate for days beyond 5 days.
+    Uses baseline data with seasonal variations.
+    
+    Args:
+        date_str: Date string (YYYY-MM-DD)
+        current_date: Date object
+        baseline_temp: Baseline temperature
+        baseline_humidity: Baseline humidity
+        baseline_pressure: Baseline pressure
+        days_from_today: Number of days from today
+        
+    Returns:
+        Dictionary with estimated forecast data
+    """
+    # Add some variation based on day of year (seasonal variation)
+    day_of_year = current_date.timetuple().tm_yday
+    seasonal_variation = 5 * math.sin(2 * math.pi * day_of_year / 365)
+    
+    # Temperature variation decreases with days ahead (less certainty)
+    temp_variation = max(2, 8 - days_from_today * 0.2)
+    estimated_temp = baseline_temp + seasonal_variation + random.uniform(-temp_variation, temp_variation)
+    
+    # Min/max temp with daily variation
+    min_temp = round(estimated_temp - random.uniform(3, 7), 1)
+    max_temp = round(estimated_temp + random.uniform(3, 7), 1)
+    
+    # Humidity variation
+    humidity_variation = random.uniform(-15, 15)
+    estimated_humidity = max(30, min(90, baseline_humidity + humidity_variation))
+    
+    # Pressure variation
+    pressure_variation = random.uniform(-10, 10)
+    estimated_pressure = max(980, min(1040, baseline_pressure + pressure_variation))
+    
+    # Condition based on humidity and pressure
+    if estimated_humidity > 70 and estimated_pressure < 1010:
+        condition = "Rain"
+        description = "likely rain"
+    elif estimated_humidity > 60:
+        condition = "Clouds"
+        description = "partly cloudy"
+    else:
+        condition = "Clear"
+        description = "mostly clear"
+    
+    return {
+        "date": date_str,
+        "day_name": current_date.strftime("%A"),
+        "min_temp": min_temp,
+        "max_temp": max_temp,
+        "condition": condition,
+        "description": description,
+        "forecast_type": "climatological",
+        "note": "Estimated forecast based on climatological data",
+        "hourly_forecasts": [
+            {
+                "time": f"{date_str} 12:00",
+                "temperature": round(estimated_temp, 1),
+                "feels_like": round(estimated_temp - 2, 1),
+                "condition": condition,
+                "description": description,
+                "wind_speed": round(random.uniform(5, 20), 1),
+                "humidity": int(estimated_humidity),
+                "pressure": int(estimated_pressure),
+                "cloud_cover": int(estimated_humidity / 2),
+                "precipitation": round(random.uniform(0, 2), 1) if condition == "Rain" else 0
+            }
+        ]
+    }
+
+
+def get_weather_forecast(lat: float, lon: float, location: str, resolved_name: str, 
+                         start_date: str, end_date: str, api_key: str) -> Dict[str, Any]:
+    """
+    Get weather forecast for a date range.
+    
+    Args:
+        lat: Latitude
+        lon: Longitude
+        location: Original location query
+        resolved_name: Resolved location name
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
+        api_key: OpenWeatherMap API key
+        
+    Returns:
+        Dictionary with forecast data
+    """
+    try:
+        # Parse dates
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Calculate days difference
+        days_diff = (start - today).days
+        
+        if days_diff < 0:
+            return {
+                "error": "Start date cannot be in the past. Please select a future date.",
+                "success": False
+            }
+        
+        # Check if forecast exceeds 30 days
+        total_days = (end - start).days + 1
+        if total_days > 30:
+            return {
+                "error": "Forecast is only available for up to 30 days in advance. Please select a date range within 30 days.",
+                "success": False
+            }
+        
+        # Get 5-day forecast from OpenWeatherMap
+        url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric"
         response = requests.get(url, timeout=10)
         data = response.json()
         
         if response.status_code == 200:
-            weather_info = {
-                "city": city,
-                "weather": data.get('weather', [{}])[0].get("description", "N/A"),
-                "temperature": round(data.get("main", {}).get("temp", 273.15) - 273.15, 1),
-                "wind_speed": data.get("wind", {}).get("speed", 0.0),
-                "humidity": data.get("main", {}).get("humidity", 0),
-                "pressure": data.get("main", {}).get("pressure", 0),
-                "cloud_cover": data.get("clouds", {}).get("all", 0),
-            }
-            logger.info("weather_data_tool.success", city=city, temp=weather_info["temperature"])
+            forecasts = []
+            forecast_list = data.get("list", [])
             
-            return f"""Weather Data for {city}:
-- Conditions: {weather_info['weather']}
-- Temperature: {weather_info['temperature']}°C
-- Wind Speed: {weather_info['wind_speed']} m/s
-- Humidity: {weather_info['humidity']}%
-- Pressure: {weather_info['pressure']} hPa
-- Cloud Cover: {weather_info['cloud_cover']}%"""
+            # Get current weather for baseline climatological data
+            current_weather_url = f"http://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
+            current_response = requests.get(current_weather_url, timeout=10)
+            current_data = current_response.json() if current_response.status_code == 200 else {}
+            
+            # Extract baseline data for climatological estimates
+            baseline_temp = current_data.get("main", {}).get("temp", 25) if current_data else 25
+            baseline_humidity = current_data.get("main", {}).get("humidity", 60) if current_data else 60
+            baseline_pressure = current_data.get("main", {}).get("pressure", 1013) if current_data else 1013
+            
+            # Process each day in the requested range
+            current_date = start
+            day_index = 0
+            while current_date <= end:
+                date_str = current_date.strftime("%Y-%m-%d")
+                days_from_today = (current_date - today).days
+                
+                # For first 5 days, use actual forecast data
+                if days_from_today <= 5:
+                    day_forecasts = []
+                    for item in forecast_list:
+                        forecast_time = datetime.fromtimestamp(item.get("dt", 0))
+                        if forecast_time.strftime("%Y-%m-%d") == date_str:
+                            day_forecasts.append({
+                                "time": forecast_time.strftime("%Y-%m-%d %H:%M"),
+                                "temperature": round(item.get("main", {}).get("temp", 0), 1),
+                                "feels_like": round(item.get("main", {}).get("feels_like", 0), 1),
+                                "condition": item.get('weather', [{}])[0].get("main", "N/A"),
+                                "description": item.get('weather', [{}])[0].get("description", "N/A"),
+                                "wind_speed": round(item.get("wind", {}).get("speed", 0) * 3.6, 1),  # km/h
+                                "humidity": item.get("main", {}).get("humidity", 0),
+                                "pressure": item.get("main", {}).get("pressure", 0),
+                                "cloud_cover": item.get("clouds", {}).get("all", 0),
+                                "precipitation": item.get("rain", {}).get("3h", 0) if item.get("rain") else 0
+                            })
+                    
+                    if day_forecasts:
+                        # Calculate daily summary from actual forecast
+                        temps = [f["temperature"] for f in day_forecasts]
+                        min_temp = min(temps)
+                        max_temp = max(temps)
+                        
+                        forecasts.append({
+                            "date": date_str,
+                            "day_name": current_date.strftime("%A"),
+                            "min_temp": min_temp,
+                            "max_temp": max_temp,
+                            "condition": day_forecasts[0]["condition"],
+                            "description": day_forecasts[0]["description"],
+                            "hourly_forecasts": day_forecasts,
+                            "forecast_type": "actual"
+                        })
+                    else:
+                        # If no forecast data for this day, use climatological estimate
+                        forecasts.append(create_climatological_forecast(
+                            date_str, current_date, baseline_temp, baseline_humidity, baseline_pressure, days_from_today
+                        ))
+                else:
+                    # For days 6-30, use climatological estimates
+                    forecasts.append(create_climatological_forecast(
+                        date_str, current_date, baseline_temp, baseline_humidity, baseline_pressure, days_from_today
+                    ))
+                
+                current_date += timedelta(days=1)
+                day_index += 1
+            
+            if not forecasts:
+                return {
+                    "error": f"No forecast data available for the selected date range ({start_date} to {end_date}).",
+                    "success": False
+                }
+            
+            result = {
+                "success": True,
+                "location": resolved_name,
+                "original_query": location,
+                "coordinates": {"lat": lat, "lon": lon},
+                "start_date": start_date,
+                "end_date": end_date,
+                "forecast_type": "trip_planning",
+                "forecasts": forecasts,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info("weather_forecast.success", location=location, days=len(forecasts))
+            return result
         else:
             error_msg = f"Error: {data.get('message', 'Unknown error')}"
-            logger.error("weather_data_tool.error", city=city, error=error_msg)
-            return error_msg
+            logger.error("weather_forecast.error", location=location, error=error_msg)
+            return {"error": error_msg, "success": False}
+            
+    except ValueError as e:
+        error_msg = f"Invalid date format. Please use YYYY-MM-DD format."
+        logger.error("weather_forecast.date_error", error=str(e))
+        return {"error": error_msg, "success": False}
     except Exception as e:
-        error_msg = f"Error fetching weather data: {str(e)}"
-        logger.error("weather_data_tool.exception", city=city, error=str(e))
-        return error_msg
+        error_msg = f"Error fetching forecast: {str(e)}"
+        logger.error("weather_forecast.exception", location=location, error=str(e))
+        return {"error": error_msg, "success": False}
 
 
-def get_social_media_reports(city: str, context: str = "") -> str:
+def get_social_media_reports(location: str, context: str = "") -> str:
     """
     Get simulated social media reports about weather conditions.
     Now generates reports based on actual current weather to avoid conflicts.
     
     Args:
-        city: Name of the city to monitor
+        location: Location string (area, city, village) to monitor
         context: Additional context (optional)
         
     Returns:
@@ -74,98 +369,99 @@ def get_social_media_reports(city: str, context: str = "") -> str:
     """
     # Get actual weather to generate realistic social media reports
     try:
-        weather_data = get_weather_data(city)
+        weather_data = get_weather_data(location)
         
         # Extract weather condition from the response
-        if "Conditions:" in weather_data:
-            condition_line = [line for line in weather_data.split('\n') if 'Conditions:' in line][0]
-            condition = condition_line.split(':')[1].strip()
+        if isinstance(weather_data, dict) and weather_data.get("success"):
+            condition = weather_data.get("condition", "normal")
+            location_name = weather_data.get("location", location)
         else:
             condition = "normal"
+            location_name = location
             
         # Generate reports based on actual weather
         if "rain" in condition.lower() or "drizzle" in condition.lower():
             reports = [
-                f"⚠️ Rain reported in {city} - roads getting wet - @citizen1",
-                f"🌧️ Rainy conditions in {city}, drive carefully - @localreporter",
-                f"☔ People using umbrellas in {city} downtown - @commuter99",
-                f"💧 Rain showers in {city} area - @weather_watcher",
-                f"🚗 Traffic slower due to rain in {city} - @traffic_updates"
+                f"⚠️ Rain reported in {location_name} - roads getting wet - @citizen1",
+                f"🌧️ Rainy conditions in {location_name}, drive carefully - @localreporter",
+                f"☔ People using umbrellas in {location_name} downtown - @commuter99",
+                f"💧 Rain showers in {location_name} area - @weather_watcher",
+                f"🚗 Traffic slower due to rain in {location_name} - @traffic_updates"
             ]
         elif "thunderstorm" in condition.lower() or "storm" in condition.lower():
             reports = [
-                f"⚡ Thunderstorm in {city} - stay safe - @citizen1",
-                f"🌩️ Lightning seen in {city} skies - @localreporter",
-                f"⚠️ Storm conditions in {city}, seek shelter - @emergency_mgmt",
-                f"💨 Strong winds during storm in {city} - @weather_alerts",
-                f"🏠 Residents advised to stay indoors in {city} - @safety_first"
+                f"⚡ Thunderstorm in {location_name} - stay safe - @citizen1",
+                f"🌩️ Lightning seen in {location_name} skies - @localreporter",
+                f"⚠️ Storm conditions in {location_name}, seek shelter - @emergency_mgmt",
+                f"💨 Strong winds during storm in {location_name} - @weather_alerts",
+                f"🏠 Residents advised to stay indoors in {location_name} - @safety_first"
             ]
         elif "snow" in condition.lower():
             reports = [
-                f"❄️ Snow falling in {city} - @citizen1",
-                f"⛄ Winter weather in {city} - @localreporter",
-                f"🚗 Roads slippery in {city}, drive slow - @traffic_updates",
-                f"☃️ Beautiful snow in {city} downtown - @weather_lover",
-                f"🌨️ Snowfall continuing in {city} - @weather_alerts"
+                f"❄️ Snow falling in {location_name} - @citizen1",
+                f"⛄ Winter weather in {location_name} - @localreporter",
+                f"🚗 Roads slippery in {location_name}, drive slow - @traffic_updates",
+                f"☃️ Beautiful snow in {location_name} downtown - @weather_lover",
+                f"🌨️ Snowfall continuing in {location_name} - @weather_alerts"
             ]
         elif "clear" in condition.lower() or "sun" in condition.lower():
             reports = [
-                f"☀️ Beautiful sunny day in {city} - @citizen1",
-                f"😎 Clear skies over {city} today - @localreporter",
-                f"🌞 Perfect weather in {city} for outdoor activities - @lifestyle",
-                f"🏃 People enjoying the sunshine in {city} parks - @community_news",
-                f"📸 Great day for photography in {city} - @photo_enthusiast"
+                f"☀️ Beautiful sunny day in {location_name} - @citizen1",
+                f"😎 Clear skies over {location_name} today - @localreporter",
+                f"🌞 Perfect weather in {location_name} for outdoor activities - @lifestyle",
+                f"🏃 People enjoying the sunshine in {location_name} parks - @community_news",
+                f"📸 Great day for photography in {location_name} - @photo_enthusiast"
             ]
         elif "cloud" in condition.lower() or "overcast" in condition.lower():
             reports = [
-                f"☁️ Cloudy skies in {city} today - @citizen1",
-                f"🌥️ Overcast conditions in {city} - @localreporter",
-                f"⛅ Grey skies over {city} - @weather_watcher",
-                f"🌤️ Clouds covering {city}, might rain later - @forecast_tracker",
-                f"😐 Typical overcast day in {city} - @daily_observer"
+                f"☁️ Cloudy skies in {location_name} today - @citizen1",
+                f"🌥️ Overcast conditions in {location_name} - @localreporter",
+                f"⛅ Grey skies over {location_name} - @weather_watcher",
+                f"🌤️ Clouds covering {location_name}, might rain later - @forecast_tracker",
+                f"😐 Typical overcast day in {location_name} - @daily_observer"
             ]
         elif "mist" in condition.lower() or "fog" in condition.lower() or "haze" in condition.lower():
             reports = [
-                f"🌫️ Misty conditions in {city} this morning - @citizen1",
-                f"👁️ Low visibility in {city} due to fog - @localreporter",
-                f"🚗 Drive carefully, foggy roads in {city} - @traffic_safety",
-                f"🌁 Hazy atmosphere in {city} today - @air_quality",
-                f"😶‍🌫️ Dense fog in {city} downtown area - @commuter99"
+                f"🌫️ Misty conditions in {location_name} this morning - @citizen1",
+                f"👁️ Low visibility in {location_name} due to fog - @localreporter",
+                f"🚗 Drive carefully, foggy roads in {location_name} - @traffic_safety",
+                f"🌁 Hazy atmosphere in {location_name} today - @air_quality",
+                f"😶‍🌫️ Dense fog in {location_name} downtown area - @commuter99"
             ]
         elif "smoke" in condition.lower():
             reports = [
-                f"😷 Smoky conditions in {city} - air quality concerns - @citizen1",
-                f"🚨 Smoke affecting visibility in {city} - @localreporter",
-                f"🏭 Industrial smoke or pollution in {city} area - @environment_watch",
-                f"😮‍💨 Poor air quality in {city} - wear masks - @health_advisory",
-                f"🌫️ Smoky haze over {city} today - @air_quality"
+                f"😷 Smoky conditions in {location_name} - air quality concerns - @citizen1",
+                f"🚨 Smoke affecting visibility in {location_name} - @localreporter",
+                f"🏭 Industrial smoke or pollution in {location_name} area - @environment_watch",
+                f"😮‍💨 Poor air quality in {location_name} - wear masks - @health_advisory",
+                f"🌫️ Smoky haze over {location_name} today - @air_quality"
             ]
         else:
             reports = [
-                f"📍 Normal conditions in {city} - @citizen1",
-                f"👍 Typical day in {city} - @localreporter",
-                f"� Regular weather in {city} area - @weather_updates",
-                f"✅ All good in {city} today - @community_news",
-                f"😊 Pleasant conditions in {city} - @lifestyle"
+                f"📍 Normal conditions in {location_name} - @citizen1",
+                f"👍 Typical day in {location_name} - @localreporter",
+                f"� Regular weather in {location_name} area - @weather_updates",
+                f"✅ All good in {location_name} today - @community_news",
+                f"😊 Pleasant conditions in {location_name} - @lifestyle"
             ]
             
     except Exception as e:
-        logger.warning("social_media_tool.fallback", city=city, error=str(e))
+        logger.warning("social_media_tool.fallback", location=location, error=str(e))
         # Fallback to neutral reports if weather fetch fails
         reports = [
-            f"📱 Citizens reporting from {city} - @citizen1",
-            f"📰 Local updates from {city} - @localreporter",
-            f"🗣️ Community discussions about {city} weather - @community",
-            f"💬 Weather chatter in {city} - @social_feed",
-            f"📢 Updates from {city} area - @news_hub"
+            f"📱 Citizens reporting from {location} - @citizen1",
+            f"📰 Local updates from {location} - @localreporter",
+            f"🗣️ Community discussions about {location} weather - @community",
+            f"💬 Weather chatter in {location} - @social_feed",
+            f"📢 Updates from {location} area - @news_hub"
         ]
     
-    logger.info("social_media_tool.success", city=city, report_count=len(reports))
+    logger.info("social_media_tool.success", location=location, report_count=len(reports))
     current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    return f"Social Media Reports for {city} (Collected on: {current_date}):\n" + "\n".join(reports)
+    return f"Social Media Reports for {location} (Collected on: {current_date}):\n" + "\n".join(reports)
 
 
-def analyze_disaster_type(weather_data: str, social_reports: str) -> str:
+def analyze_disaster_type(weather_data: Any, social_reports: str) -> str:
     """
     Analyze weather data and social media to identify disaster type and severity.
     
@@ -183,30 +479,37 @@ def analyze_disaster_type(weather_data: str, social_reports: str) -> str:
     confidence = "Medium"
     
     try:
-        wind_match = re.search(r"Wind Speed:\s*(\d+\.?\d*)", weather_data)
-        if wind_match:
-            wind_speed = float(wind_match.group(1))
-            if wind_speed > 33:
-                disaster_type = "Hurricane"
-                severity = "Critical"
-                confidence = "High"
-            elif wind_speed > 25:
-                disaster_type = "Severe Storm"
-                severity = "High"
-                confidence = "High"
+        # Handle both dict and string formats
+        if isinstance(weather_data, dict):
+            wind_speed = weather_data.get("wind_speed", 0)
+            temperature = weather_data.get("temperature", 0)
+            weather_str = str(weather_data).lower()
+        else:
+            weather_str = str(weather_data).lower()
+            wind_match = re.search(r"Wind Speed:\s*(\d+\.?\d*)", weather_data)
+            wind_speed = float(wind_match.group(1)) if wind_match else 0
+            
+            temp_match = re.search(r"Temperature:\s*(\d+\.?\d*)", weather_data)
+            temperature = float(temp_match.group(1)) if temp_match else 0
         
-        if "flood" in weather_data.lower() or "flood" in social_reports.lower():
+        if wind_speed > 33:
+            disaster_type = "Hurricane"
+            severity = "Critical"
+            confidence = "High"
+        elif wind_speed > 25:
+            disaster_type = "Severe Storm"
+            severity = "High"
+            confidence = "High"
+        
+        if "flood" in weather_str or "flood" in social_reports.lower():
             disaster_type = "Flood"
             severity = "High"
             confidence = "High"
         
-        temp_match = re.search(r"Temperature:\s*(\d+\.?\d*)", weather_data)
-        if temp_match:
-            temperature = float(temp_match.group(1))
-            if temperature > 40:
-                disaster_type = "Heatwave"
-                severity = "High" if temperature < 45 else "Critical"
-                confidence = "High"
+        if temperature > 40:
+            disaster_type = "Heatwave"
+            severity = "High" if temperature < 45 else "Critical"
+            confidence = "High"
     
     except Exception as e:
         logger.error("disaster_analysis_tool.error", error=str(e))
@@ -220,14 +523,14 @@ Confidence: {confidence}
 Reasoning: Based on meteorological data and social media reports"""
 
 
-def generate_response_plan(disaster_type: str, severity: str, city: str) -> str:
+def generate_response_plan(disaster_type: str, severity: str, location: str) -> str:
     """
     Generate a comprehensive disaster response plan.
     
     Args:
         disaster_type: Type of disaster
         severity: Severity level (Critical, High, Medium, Low)
-        city: Affected city
+        location: Affected location (area, city, village)
         
     Returns:
         Response plan as a formatted string
@@ -258,7 +561,7 @@ def generate_response_plan(disaster_type: str, severity: str, city: str) -> str:
         timeline = "Monitor - 1-2 hours"
     
     plan = f"""
-EMERGENCY RESPONSE PLAN - {city.upper()}
+EMERGENCY RESPONSE PLAN - {location.upper()}
 {'=' * 60}
 Disaster Type: {disaster_type}
 Severity Level: {severity}

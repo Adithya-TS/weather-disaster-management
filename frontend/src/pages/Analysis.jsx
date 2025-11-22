@@ -9,18 +9,18 @@ import { AlertTriangle } from 'lucide-react';
 import { getSeverityColor, getDisasterIcon } from '../utils/helpers';
 
 const Analysis = () => {
-  const [city, setCity] = useState('');
+  const [location, setLocation] = useState('');
   const [weatherData, setWeatherData] = useState('');
   const [socialReports, setSocialReports] = useState('');
   const [analysisResult, setAnalysisResult] = useState(null);
   const { analyzeDisaster, loading } = useWorkflow();
 
   const handleAnalyze = async () => {
-    if (!city.trim()) return;
+    if (!location.trim()) return;
 
     try {
       const data = await analyzeDisaster({
-        city: city.trim(),
+        location: location.trim(),
         weather_data: weatherData || undefined,
         social_reports: socialReports || undefined,
       });
@@ -41,16 +41,16 @@ const Analysis = () => {
           <CardHeader>
             <CardTitle>Analyze Disaster</CardTitle>
             <CardDescription>
-              Enter city name and optionally provide weather data or social media reports
+              Enter location (area, city, or village) and optionally provide weather data or social media reports
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <Input
-                label="City Name"
-                placeholder="e.g., Miami"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
+                label="Location"
+                placeholder="e.g., Ashok Nagar, Chennai or Seruvamani, Thiruvarur"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
                 required
               />
               <div>
@@ -97,9 +97,9 @@ const Analysis = () => {
               <CardContent>
                 <div className="space-y-4">
                   <div>
-                    <span className="text-sm text-gray-600 dark:text-gray-400">City</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Location</span>
                     <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {analysisResult.city || city}
+                      {analysisResult.location || location}
                     </p>
                   </div>
                   <div>
@@ -179,7 +179,7 @@ const Analysis = () => {
             <CardContent className="p-12 text-center">
               <AlertTriangle size={48} className="mx-auto text-gray-400 mb-4" />
               <p className="text-gray-600 dark:text-gray-400">
-                Enter a city name to analyze disaster situation
+                Enter a location to analyze disaster situation
               </p>
             </CardContent>
           </Card>

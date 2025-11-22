@@ -60,12 +60,12 @@ class WorkflowExecutor:
                    app_name=self.app_name,
                    log_file=self.observability.get_log_file())
     
-    async def execute(self, city: str) -> dict:
+    async def execute(self, location: str) -> dict:
         """
-        Execute the complete disaster management workflow for a city.
+        Execute the complete disaster management workflow for a location.
         
         Args:
-            city: City name to analyze
+            location: Location (area, city, village) to analyze
             
         Returns:
             dict: Workflow results including disaster analysis and actions taken
@@ -75,7 +75,7 @@ class WorkflowExecutor:
         
         # Log workflow start
         start_time = datetime.now()
-        self.observability.log_workflow_start(city=city, session_id=session_id)
+        self.observability.log_workflow_start(location=location, session_id=session_id)
         
         try:
             # Create session
@@ -88,12 +88,12 @@ class WorkflowExecutor:
             # Create user message
             user_message = types.Content(
                 parts=[types.Part(
-                    text=f"Analyze and respond to weather disaster situation in {city}"
+                    text=f"Analyze and respond to weather disaster situation in {location}"
                 )]
             )
             
             # Execute agent workflow using Runner
-            logger.info("workflow.executing_agent", city=city, session_id=session_id)
+            logger.info("workflow.executing_agent", location=location, session_id=session_id)
             
             response_text = ""
             async for event in self.runner.run_async(
@@ -116,21 +116,21 @@ class WorkflowExecutor:
             # Log the final agent response
             if response_text:
                 logger.info("agent_response.final",
-                           city=city,
+                           location=location,
                            session_id=session_id,
                            response=response_text,
                            response_length=len(response_text))
             
             # Log success
             self.observability.log_workflow_complete(
-                city=city,
+                location=location,
                 duration=duration,
                 session_id=session_id
             )
             
             return {
                 "success": True,
-                "city": city,
+                "location": location,
                 "session_id": session_id,
                 "response": response_text,
                 "duration": duration,
@@ -140,11 +140,11 @@ class WorkflowExecutor:
         except Exception as e:
             # Log error
             error_msg = str(e)
-            self.observability.log_workflow_error(city=city, error=error_msg)
+            self.observability.log_workflow_error(location=location, error=error_msg)
             
             return {
                 "success": False,
-                "city": city,
+                "location": location,
                 "error": error_msg,
                 "timestamp": datetime.now().isoformat()
             }
