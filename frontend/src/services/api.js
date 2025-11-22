@@ -13,11 +13,6 @@ const apiClient = axios.create({
 // Request interceptor
 apiClient.interceptors.request.use(
   (config) => {
-    // Add any auth tokens here if needed
-    // const token = localStorage.getItem('token');
-    // if (token) {
-    //   config.headers.Authorization = `Bearer ${token}`;
-    // }
     return config;
   },
   (error) => {
@@ -42,16 +37,12 @@ apiClient.interceptors.response.use(
     if (error.response) {
       switch (error.response.status) {
         case 401:
-          // Handle unauthorized
           break;
         case 403:
-          // Handle forbidden
           break;
         case 404:
-          // Handle not found
           break;
         case 500:
-          // Handle server error
           break;
         default:
           break;
@@ -76,10 +67,16 @@ export const apiService = {
   getStatus: () => apiClient.get('/api/v1/status'),
 
   // Weather data
-  getWeather: (city) => apiClient.get(`/api/v1/weather/${city}`),
+  getWeather: (location, startDate, endDate) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    const queryString = params.toString();
+    return apiClient.get(`/api/v1/weather/${encodeURIComponent(location)}${queryString ? '?' + queryString : ''}`);
+  },
 
   // Social media reports
-  getSocialMedia: (city) => apiClient.get(`/api/v1/social-media/${city}`),
+  getSocialMedia: (location) => apiClient.get(`/api/v1/social-media/${encodeURIComponent(location)}`),
 
   // Analyze disaster
   analyzeDisaster: (data) => apiClient.post('/api/v1/analyze', data),
@@ -94,7 +91,7 @@ export const apiService = {
   sendAlerts: (data) => apiClient.post('/api/v1/alerts', data),
 
   // Full workflow
-  executeWorkflow: (data) => apiClient.post('/api/v1/disaster-response', data),
+  executeWorkflow: (location) => apiClient.post('/api/v1/disaster-response', { location }),
 
   // Session management
   getSessions: (limit = 10) => apiClient.get(`/api/v1/sessions?limit=${limit}`),

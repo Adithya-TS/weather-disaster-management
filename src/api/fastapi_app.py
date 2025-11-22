@@ -37,7 +37,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins="http://localhost:3001",  # Whitelist UI origin
+    allow_origins="http://localhost:3000",  # Whitelist UI origin
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,12 +54,12 @@ evaluation_suite = EvaluationSuite()
 # ============================================================================
 
 class DisasterRequest(BaseModel):
-    city: str = Field(..., min_length=2, description="City to analyze")
+    location: str = Field(..., min_length=2, description="Location (area, city, village) to analyze")
 
 
 class DisasterResponse(BaseModel):
     success: bool
-    city: str
+    location: str
     session_id: Optional[str] = None
     response: Optional[str] = None
     duration: Optional[float] = None
@@ -67,7 +67,7 @@ class DisasterResponse(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    city: str = Field(..., min_length=2, description="City to analyze")
+    location: str = Field(..., min_length=2, description="Location (area, city, village) to analyze")
     weather_data: Optional[str] = Field(None, description="Optional pre-fetched weather data")
     social_reports: Optional[str] = Field(None, description="Optional pre-fetched social media reports")
 
@@ -75,7 +75,7 @@ class AnalyzeRequest(BaseModel):
 class PlanRequest(BaseModel):
     disaster_type: str = Field(..., description="Type of disaster")
     severity: str = Field(..., description="Severity level (Critical, High, Medium, Low)")
-    city: str = Field(..., min_length=2, description="Affected city")
+    location: str = Field(..., min_length=2, description="Affected location (area, city, village)")
 
 
 class AlertRequest(BaseModel):
@@ -133,46 +133,57 @@ async def get_system_status():
 # Tool Endpoints (Individual Components)
 # ============================================================================
 
-@app.get("/api/v1/weather/{city}", tags=["Tools"])
+@app.get("/api/v1/weather/{location}", tags=["Tools"])
 async def get_weather(
-    city: str = Path(..., description="City name", min_length=2)
+    location: str = Path(..., description="Location (area, city, village)", min_length=2),
+    start_date: Optional[str] = Query(None, description="Start date for forecast (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date for forecast (YYYY-MM-DD)")
 ):
     """
-    Get real-time weather data for a city.
-    Direct access to weather data tool.
+    Get weather data for a location (area, city, village).
+    Supports both current weather and future forecasts.
+    For forecasts, provide both start_date and end_date.
     """
     try:
-        weather_data = get_weather_data(city)
+        weather_data = get_weather_data(location, start_date, end_date)
+        
+        if isinstance(weather_data, dict) and not weather_data.get("success"):
+            error_msg = weather_data.get("error", "Unknown error")
+            logger.error("api.weather.error", location=location, error=error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+        
         return {
             "success": True,
-            "city": city,
+            "location": location,
             "weather_data": weather_data,
             "timestamp": datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error("api.weather.error", city=city, error=str(e))
+        logger.error("api.weather.error", location=location, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to fetch weather data: {str(e)}")
 
 
-@app.get("/api/v1/social-media/{city}", tags=["Tools"])
+@app.get("/api/v1/social-media/{location}", tags=["Tools"])
 async def get_social_media(
-    city: str = Path(..., description="City name", min_length=2),
+    location: str = Path(..., description="Location (area, city, village)", min_length=2),
     context: Optional[str] = Query(None, description="Additional context")
 ):
     """
-    Get social media reports for a city.
+    Get social media reports for a location.
     Direct access to social media monitoring tool.
     """
     try:
-        reports = get_social_media_reports(city, context or "")
+        reports = get_social_media_reports(location, context or "")
         return {
             "success": True,
-            "city": city,
+            "location": location,
             "reports": reports,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        logger.error("api.social_media.error", city=city, error=str(e))
+        logger.error("api.social_media.error", location=location, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to fetch social media reports: {str(e)}")
 
 
@@ -184,22 +195,22 @@ async def analyze_disaster(payload: AnalyzeRequest):
     """
     try:
         # Fetch data if not provided
-        weather = payload.weather_data or get_weather_data(payload.city)
-        social = payload.social_reports or get_social_media_reports(payload.city)
+        weather = payload.weather_data or get_weather_data(payload.location)
+        social = payload.social_reports or get_social_media_reports(payload.location)
         
         # Analyze
         analysis = analyze_disaster_type(weather, social)
         
         return {
             "success": True,
-            "city": payload.city,
+            "location": payload.location,
             "analysis": analysis,
             "weather_data": weather,
             "social_reports": social,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        logger.error("api.analyze.error", city=payload.city, error=str(e))
+        logger.error("api.analyze.error", location=payload.location, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to analyze disaster: {str(e)}")
 
 
@@ -213,18 +224,18 @@ async def generate_plan(payload: PlanRequest):
         plan = generate_response_plan(
             payload.disaster_type,
             payload.severity,
-            payload.city
+            payload.location
         )
         return {
             "success": True,
-            "city": payload.city,
+            "location": payload.location,
             "disaster_type": payload.disaster_type,
             "severity": payload.severity,
             "response_plan": plan,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        logger.error("api.plan.error", city=payload.city, error=str(e))
+        logger.error("api.plan.error", location=payload.location, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to generate plan: {str(e)}")
 
 
@@ -278,17 +289,17 @@ async def send_alerts(payload: AlertRequest):
 )
 async def run_disaster_workflow(payload: DisasterRequest):
     """
-    Execute the complete disaster-management workflow for a city.
+    Execute the complete disaster-management workflow for a location.
     This runs the full agentic AI pipeline: analysis → planning → verification → alerts.
     """
-    logger.info("api.workflow.request", city=payload.city)
-    result = await executor.execute(payload.city)
+    logger.info("api.workflow.request", location=payload.location)
+    result = await executor.execute(payload.location)
 
     if not result.get("success"):
-        logger.error("api.workflow.failed", city=payload.city, error=result.get("error"))
+        logger.error("api.workflow.failed", location=payload.location, error=result.get("error"))
         raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
 
-    logger.info("api.workflow.completed", city=payload.city, session_id=result.get("session_id"))
+    logger.info("api.workflow.completed", location=payload.location, session_id=result.get("session_id"))
     return result
 
 

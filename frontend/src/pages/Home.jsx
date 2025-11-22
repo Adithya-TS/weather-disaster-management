@@ -10,21 +10,21 @@ import Loader from '../components/ui/Loader';
 import { AlertTriangle, Cloud, TrendingUp } from 'lucide-react';
 
 const Home = () => {
-  const [city, setCity] = useState('');
+  const [location, setLocation] = useState('');
   const navigate = useNavigate();
   const { executeWorkflow, loading } = useWorkflow();
   const { showSuccess, showError } = useToastNotifications();
 
   const handleExecuteWorkflow = async () => {
-    if (!city.trim()) {
-      showError('Please enter a city name');
+    if (!location.trim()) {
+      showError('Please enter a location');
       return;
     }
 
     try {
-      const result = await executeWorkflow(city.trim(), {
+      const result = await executeWorkflow(location.trim(), {
         onSuccess: (data) => {
-          showSuccess(`Workflow completed for ${city}`);
+          showSuccess(`Workflow completed for ${location}`);
           // Navigate to response plan page with data
           navigate('/response-plan', { state: { workflowData: data } });
         },
@@ -73,16 +73,16 @@ const Home = () => {
             <CardHeader>
               <CardTitle>Execute Disaster Response Workflow</CardTitle>
               <CardDescription>
-                Enter a city name to trigger the complete disaster response workflow
+                Enter a location (area, city, or village) to trigger the complete disaster response workflow
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 <Input
-                  label="City Name"
-                  placeholder="e.g., Miami, New York, Los Angeles"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
+                  label="Location"
+                  placeholder="e.g., Ashok Nagar, Chennai or Seruvamani, Thiruvarur"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
                   onKeyPress={(e) => {
                     if (e.key === 'Enter') {
                       handleExecuteWorkflow();
