@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { apiService } from '../services/api';
 
 const SessionContext = createContext();
@@ -15,8 +15,15 @@ export const SessionProvider = ({ children }) => {
   const [sessions, setSessions] = useState([]);
   const [currentSession, setCurrentSession] = useState(null);
   const [loading, setLoading] = useState(false);
+  const fetchingRef = useRef(false); // Track if a fetch is in progress
 
-  const fetchSessions = async (limit = 10) => {
+  const fetchSessions = useCallback(async (limit = 10) => {
+    // Prevent multiple simultaneous calls using ref (doesn't cause re-renders)
+    if (fetchingRef.current) {
+      return;
+    }
+    
+    fetchingRef.current = true;
     setLoading(true);
     try {
       const response = await apiService.getSessions(limit);
@@ -35,8 +42,9 @@ export const SessionProvider = ({ children }) => {
       setSessions([]); // Ensure sessions is always an array
     } finally {
       setLoading(false);
+      fetchingRef.current = false;
     }
-  };
+  }, []); // Empty dependency array - function is stable and doesn't depend on state
 
   const fetchSession = async (sessionId) => {
     setLoading(true);
@@ -61,9 +69,8 @@ export const SessionProvider = ({ children }) => {
     setCurrentSession(session);
   };
 
-  useEffect(() => {
-    fetchSessions();
-  }, []);
+  // Note: fetchSessions is called by components that need it, not automatically on mount
+  // This prevents unnecessary API calls and potential infinite loops
 
   return (
     <SessionContext.Provider

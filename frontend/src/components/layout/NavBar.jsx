@@ -1,11 +1,14 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTheme } from '../../context/ThemeContext';
-import { Moon, Sun, Menu } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { Moon, Sun, Menu, LogOut, User } from 'lucide-react';
 import { useState } from 'react';
 
 const NavBar = ({ onMenuClick }) => {
   const { isDark, toggleTheme } = useTheme();
+  const { user, logout, isAuthenticated } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navItems = [
@@ -15,7 +18,13 @@ const NavBar = ({ onMenuClick }) => {
     { path: '/analysis', label: 'Analysis' },
     { path: '/response-plan', label: 'Response Plan' },
     { path: '/sessions', label: 'Sessions' },
+    { path: '/chat-history', label: 'Chat History' },
   ];
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   const isActive = (path) => {
     if (path === '/') {
@@ -60,6 +69,12 @@ const NavBar = ({ onMenuClick }) => {
           </div>
 
           <div className="flex items-center space-x-4">
+            {isAuthenticated() && user && (
+              <div className="flex items-center space-x-2 text-sm text-gray-700 dark:text-gray-300">
+                <User size={16} />
+                <span className="hidden sm:inline">{user.name || user.email}</span>
+              </div>
+            )}
             <button
               onClick={toggleTheme}
               className="p-2 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
@@ -67,6 +82,16 @@ const NavBar = ({ onMenuClick }) => {
             >
               {isDark ? <Sun size={20} /> : <Moon size={20} />}
             </button>
+            {isAuthenticated() && (
+              <button
+                onClick={handleLogout}
+                className="p-2 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                aria-label="Logout"
+                title="Logout"
+              >
+                <LogOut size={20} />
+              </button>
+            )}
           </div>
         </div>
       </div>

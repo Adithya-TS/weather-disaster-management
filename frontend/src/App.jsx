@@ -4,10 +4,13 @@ import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
 import { LoadingProvider } from './context/LoadingContext';
 import { SessionProvider } from './context/SessionContext';
+import { AuthProvider } from './context/AuthContext';
 import NavBar from './components/layout/NavBar';
 import SideBar from './components/layout/SideBar';
 import Loader from './components/ui/Loader';
+import ProtectedRoute from './components/auth/ProtectedRoute';
 import { useLoading } from './context/LoadingContext';
+import { useAuth } from './context/AuthContext';
 
 // Pages
 import Home from './pages/Home';
@@ -16,24 +19,86 @@ import SocialMedia from './pages/SocialMedia';
 import Analysis from './pages/Analysis';
 import ResponsePlan from './pages/ResponsePlan';
 import Sessions from './pages/Sessions';
+import Login from './pages/Login';
+import ChatHistory from './pages/ChatHistory';
 
 const AppContent = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { loading, loadingMessage } = useLoading();
+  const { isAuthenticated, loading: authLoading } = useAuth();
+
+  // Show loading while checking authentication
+  if (authLoading) {
+    return <Loader fullScreen message="Loading..." />;
+  }
+
+  // Show login page if not authenticated (except for login route)
+  const showLayout = isAuthenticated();
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <NavBar onMenuClick={() => setSidebarOpen(true)} />
+      {showLayout && <NavBar onMenuClick={() => setSidebarOpen(true)} />}
       <div className="flex">
-        <SideBar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-        <main className="flex-1 lg:ml-64">
+        {showLayout && <SideBar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />}
+        <main className={showLayout ? "flex-1 lg:ml-64" : "flex-1"}>
           <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/weather" element={<Weather />} />
-            <Route path="/social-media" element={<SocialMedia />} />
-            <Route path="/analysis" element={<Analysis />} />
-            <Route path="/response-plan" element={<ResponsePlan />} />
-            <Route path="/sessions" element={<Sessions />} />
+            <Route path="/login" element={<Login />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Home />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/weather"
+              element={
+                <ProtectedRoute>
+                  <Weather />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/social-media"
+              element={
+                <ProtectedRoute>
+                  <SocialMedia />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/analysis"
+              element={
+                <ProtectedRoute>
+                  <Analysis />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/response-plan"
+              element={
+                <ProtectedRoute>
+                  <ResponsePlan />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/sessions"
+              element={
+                <ProtectedRoute>
+                  <Sessions />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/chat-history"
+              element={
+                <ProtectedRoute>
+                  <ChatHistory />
+                </ProtectedRoute>
+              }
+            />
           </Routes>
         </main>
       </div>
@@ -68,11 +133,13 @@ function App() {
   return (
     <ThemeProvider>
       <LoadingProvider>
-        <SessionProvider>
-          <Router>
-            <AppContent />
-          </Router>
-        </SessionProvider>
+        <AuthProvider>
+          <SessionProvider>
+            <Router>
+              <AppContent />
+            </Router>
+          </SessionProvider>
+        </AuthProvider>
       </LoadingProvider>
     </ThemeProvider>
   );
