@@ -23,12 +23,18 @@ export const useWorkflow = () => {
             showSuccessToast: true,
             successMessage: `Workflow executed successfully for ${location}`,
             onSuccess: (data) => {
-              setWorkflowState(data);
-              if (data.session_id) {
-                addSession(data);
+              // Ensure location fields are properly set
+              const sessionData = {
+                ...data,
+                city: data.city || data.location,
+                display_location: data.full_location || data.city || data.location,
+              };
+              setWorkflowState(sessionData);
+              if (sessionData.session_id) {
+                addSession(sessionData);
               }
               if (onSuccess) {
-                onSuccess(data);
+                onSuccess(sessionData);
               }
             },
             onError,
@@ -55,8 +61,8 @@ export const useWorkflow = () => {
   );
 
   const getSocialMedia = useCallback(
-    async (location) => {
-      return execute(() => apiService.getSocialMedia(location), {
+    async (location, date) => {
+      return execute(() => apiService.getSocialMedia(location, date), {
         showSuccessToast: false,
       });
     },

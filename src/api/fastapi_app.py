@@ -70,8 +70,13 @@ class DisasterRequest(BaseModel):
 class DisasterResponse(BaseModel):
     success: bool
     location: str
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    full_location: Optional[str] = None
     session_id: Optional[str] = None
     response: Optional[str] = None
+    raw_response: Optional[str] = None
     duration: Optional[float] = None
     timestamp: str
 
@@ -184,17 +189,20 @@ async def get_weather(
 @app.get("/api/v1/social-media/{location}", tags=["Tools"])
 async def get_social_media(
     location: str = Path(..., description="Location (area, city, village)", min_length=2),
-    context: Optional[str] = Query(None, description="Additional context")
+    context: Optional[str] = Query(None, description="Additional context"),
+    date: Optional[str] = Query(None, description="Date for reports (YYYY-MM-DD format)")
 ):
     """
     Get social media reports for a location.
     Direct access to social media monitoring tool.
+    Optionally specify a date to get reports for that specific date.
     """
     try:
-        reports = get_social_media_reports(location, context or "")
+        reports = get_social_media_reports(location, context or "", date)
         return {
             "success": True,
             "location": location,
+            "date": date or datetime.now().strftime("%Y-%m-%d"),
             "reports": reports,
             "timestamp": datetime.now().isoformat()
         }

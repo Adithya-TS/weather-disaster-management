@@ -24,6 +24,35 @@ load_dotenv()
 logger = structlog.get_logger()
 
 
+def format_disaster_response(raw_response: str, location_name: str) -> str:
+    """
+    Format the agent's disaster analysis response for better readability.
+    
+    Args:
+        raw_response: Raw response from the agent
+        location_name: Full location name with city, state, country
+        
+    Returns:
+        Formatted response string
+    """
+    if not raw_response or not raw_response.strip():
+        return f"Analysis completed for {location_name}. No immediate disaster threats detected."
+    
+    # Clean up the response
+    response = raw_response.strip()
+    
+    # Add header if not present
+    if not response.startswith("DISASTER ANALYSIS") and not response.startswith("Weather Disaster"):
+        response = f"WEATHER DISASTER ANALYSIS - {location_name.upper()}\n{'='*70}\n\n{response}"
+    
+    # Add footer with timestamp
+    if not "analyzed at" in response.lower() and not "timestamp" in response.lower():
+        from datetime import datetime
+        response += f"\n\n{'='*70}\nAnalysis completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    
+    return response
+
+
 class WorkflowExecutor:
     """
     Main workflow executor using Google ADK.
@@ -128,11 +157,41 @@ class WorkflowExecutor:
                 session_id=session_id
             )
             
+            # Try to get detailed location info from weather data if available
+            location_info = {"location": location}
+            try:
+                from .tools.custom_tools import geocode_location
+                geo_data = geocode_location(location)
+                logger.info("workflow.geocode_attempt", location=location, geo_data=geo_data)
+                if geo_data:
+                    location_parts = [geo_data.get("name", location)]
+                    if geo_data.get("state"):
+                        location_parts.append(geo_data["state"])
+                    if geo_data.get("country"):
+                        location_parts.append(geo_data["country"])
+                    location_info = {
+                        "location": location,
+                        "city": geo_data.get("name", location),
+                        "state": geo_data.get("state", ""),
+                        "country": geo_data.get("country", ""),
+                        "full_location": ", ".join(location_parts)
+                    }
+                    logger.info("workflow.location_info_created", location_info=location_info)
+            except Exception as e:
+                logger.warning("workflow.geocode_failed", error=str(e), location=location)
+            
+            # Format the response for better presentation
+            formatted_response = format_disaster_response(
+                response_text, 
+                location_info.get("full_location", location)
+            )
+            
             return {
                 "success": True,
-                "location": location,
+                **location_info,
                 "session_id": session_id,
-                "response": response_text,
+                "response": formatted_response,
+                "raw_response": response_text,  # Keep original for reference
                 "duration": duration,
                 "timestamp": datetime.now().isoformat()
             }

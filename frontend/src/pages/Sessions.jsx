@@ -70,7 +70,7 @@ const Sessions = () => {
                   <div className="flex-1">
                     <div className="flex items-center space-x-4 mb-2">
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        {session.city || session.location || 'Unknown Location'}
+                        {session.display_location || session.full_location || session.city || session.location || 'Unknown Location'}
                       </h3>
                       {session.session_id && (
                         <span className="text-xs font-mono text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
@@ -161,7 +161,7 @@ const Sessions = () => {
               <div>
                 <span className="text-sm text-gray-600 dark:text-gray-400">Location</span>
                 <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {selectedSession.city || selectedSession.location || 'N/A'}
+                  {selectedSession.display_location || selectedSession.full_location || selectedSession.city || selectedSession.location || 'N/A'}
                 </p>
               </div>
               <div>

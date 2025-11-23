@@ -86,7 +86,12 @@ export const apiService = {
   },
 
   // Social media reports
-  getSocialMedia: (location) => apiClient.get(`/api/v1/social-media/${encodeURIComponent(location)}`),
+  getSocialMedia: (location, date) => {
+    const params = new URLSearchParams();
+    if (date) params.append('date', date);
+    const queryString = params.toString();
+    return apiClient.get(`/api/v1/social-media/${encodeURIComponent(location)}${queryString ? '?' + queryString : ''}`);
+  },
 
   // Analyze disaster
   analyzeDisaster: (data) => apiClient.post('/api/v1/analyze', data),

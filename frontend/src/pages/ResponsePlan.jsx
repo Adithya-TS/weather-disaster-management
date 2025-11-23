@@ -96,9 +96,9 @@ const ResponsePlan = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card>
             <CardContent className="p-4">
-              <span className="text-sm text-gray-600 dark:text-gray-400">City</span>
+              <span className="text-sm text-gray-600 dark:text-gray-400">Location</span>
               <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {workflowData.city || 'N/A'}
+                {workflowData.display_location || workflowData.full_location || workflowData.city || workflowData.location || 'N/A'}
               </p>
             </CardContent>
           </Card>

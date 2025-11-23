@@ -10,6 +10,10 @@ import requests
 import structlog
 import math
 import random
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logger = structlog.get_logger()
 
@@ -92,7 +96,7 @@ def get_weather_data(location: str, start_date: Optional[str] = None, end_date: 
     try:
         # Check if forecast is requested
         if start_date and end_date:
-            return get_weather_forecast(lat, lon, location, resolved_name, start_date, end_date, api_key)
+            return get_weather_forecast(lat, lon, location, resolved_name, start_date, end_date, api_key, geo_data)
         else:
             # Get current weather
             url = f"http://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
@@ -100,9 +104,21 @@ def get_weather_data(location: str, start_date: Optional[str] = None, end_date: 
             data = response.json()
             
             if response.status_code == 200:
+                # Build detailed location string
+                location_parts = [resolved_name]
+                if geo_data.get("state"):
+                    location_parts.append(geo_data["state"])
+                if geo_data.get("country"):
+                    location_parts.append(geo_data["country"])
+                full_location = ", ".join(location_parts)
+                
                 weather_info = {
                     "success": True,
                     "location": resolved_name,
+                    "full_location": full_location,
+                    "city": resolved_name,
+                    "state": geo_data.get("state", ""),
+                    "country": geo_data.get("country", ""),
                     "original_query": location,
                     "coordinates": {"lat": lat, "lon": lon},
                     "weather": data.get('weather', [{}])[0].get("description", "N/A"),
@@ -206,7 +222,7 @@ def create_climatological_forecast(date_str: str, current_date: datetime, baseli
 
 
 def get_weather_forecast(lat: float, lon: float, location: str, resolved_name: str, 
-                         start_date: str, end_date: str, api_key: str) -> Dict[str, Any]:
+                         start_date: str, end_date: str, api_key: str, geo_data: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Get weather forecast for a date range.
     
@@ -218,6 +234,7 @@ def get_weather_forecast(lat: float, lon: float, location: str, resolved_name: s
         start_date: Start date (YYYY-MM-DD)
         end_date: End date (YYYY-MM-DD)
         api_key: OpenWeatherMap API key
+        geo_data: Optional geocoding data with state/country info
         
     Returns:
         Dictionary with forecast data
@@ -326,9 +343,22 @@ def get_weather_forecast(lat: float, lon: float, location: str, resolved_name: s
                     "success": False
                 }
             
+            # Build detailed location string
+            location_parts = [resolved_name]
+            if geo_data:
+                if geo_data.get("state"):
+                    location_parts.append(geo_data["state"])
+                if geo_data.get("country"):
+                    location_parts.append(geo_data["country"])
+            full_location = ", ".join(location_parts)
+            
             result = {
                 "success": True,
                 "location": resolved_name,
+                "full_location": full_location,
+                "city": resolved_name,
+                "state": geo_data.get("state", "") if geo_data else "",
+                "country": geo_data.get("country", "") if geo_data else "",
                 "original_query": location,
                 "coordinates": {"lat": lat, "lon": lon},
                 "start_date": start_date,
@@ -355,19 +385,49 @@ def get_weather_forecast(lat: float, lon: float, location: str, resolved_name: s
         return {"error": error_msg, "success": False}
 
 
-def get_social_media_reports(location: str, context: str = "") -> str:
+def get_social_media_reports(location: str, context: str = "", date: Optional[str] = None) -> str:
     """
-    Get simulated social media reports about weather conditions.
-    Now generates reports based on actual current weather to avoid conflicts.
+    Get real social media reports from Reddit, News APIs, and RSS feeds.
+    Falls back to synthetic data if real APIs are unavailable.
     
     Args:
         location: Location string (area, city, village) to monitor
         context: Additional context (optional)
+        date: Optional date for reports (YYYY-MM-DD format). If None, uses current date.
         
     Returns:
         List of social media reports as a formatted string
     """
-    # Get actual weather to generate realistic social media reports
+    from src.tools.social_media_sources import get_real_social_media_reports
+    
+    # Try to get real social media data first
+    try:
+        real_reports = get_real_social_media_reports(location, limit=10)
+        
+        if real_reports and len(real_reports) > 0:
+            # Format real reports
+            formatted_reports = []
+            for report in real_reports:
+                source = report.get("platform", "Social Media")
+                author = report.get("author", "User")
+                content = report.get("content", "").replace("\n", " ")[:150]
+                formatted_reports.append(f"📱 [{source}] {content} - @{author}")
+            
+            if date:
+                try:
+                    report_date = datetime.strptime(date, "%Y-%m-%d")
+                    current_date = report_date.strftime('%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            logger.info("social_media_tool.real_data", location=location, count=len(formatted_reports))
+            return f"Social Media Reports for {location} (Collected on: {current_date}):\n" + "\n".join(formatted_reports)
+    except Exception as e:
+        logger.warning("social_media_tool.real_data_failed", location=location, error=str(e))
+    
+    # FALLBACK: Generate synthetic reports based on actual weather data
     try:
         weather_data = get_weather_data(location)
         
@@ -456,8 +516,18 @@ def get_social_media_reports(location: str, context: str = "") -> str:
             f"📢 Updates from {location} area - @news_hub"
         ]
     
-    logger.info("social_media_tool.success", location=location, report_count=len(reports))
-    current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    logger.info("social_media_tool.synthetic_fallback", location=location, report_count=len(reports))
+    
+    # Use provided date or current date
+    if date:
+        try:
+            report_date = datetime.strptime(date, "%Y-%m-%d")
+            current_date = report_date.strftime('%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    else:
+        current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
     return f"Social Media Reports for {location} (Collected on: {current_date}):\n" + "\n".join(reports)
 
 

@@ -5,22 +5,91 @@ import Card, { CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Loader from '../components/ui/Loader';
-import { MessageSquare, User, Clock } from 'lucide-react';
+import { MessageSquare, User, Clock, Calendar } from 'lucide-react';
 import { formatDate } from '../utils/helpers';
 
 const SocialMedia = () => {
-  const [city, setCity] = useState('');
+  const [location, setLocation] = useState('');
+  const [date, setDate] = useState('');
   const [reports, setReports] = useState(null);
+  const [parsedReports, setParsedReports] = useState([]);
   const { getSocialMedia, loading } = useWorkflow();
 
+  // Calculate min date (3 days ago) and max date (today)
+  const getMinDate = () => {
+    const date = new Date();
+    date.setDate(date.getDate() - 3);
+    return date.toISOString().split('T')[0];
+  };
+
+  const getMaxDate = () => {
+    return new Date().toISOString().split('T')[0];
+  };
+
+  const minDate = getMinDate();
+  const maxDate = getMaxDate();
+
+  const parseReports = (reportsString) => {
+    if (!reportsString || typeof reportsString !== 'string') return [];
+    
+    // Split by newlines and filter out the header
+    const lines = reportsString.split('\n').filter(line => line.trim());
+    const reportLines = lines.slice(1); // Skip the "Social Media Reports for..." header
+    
+    return reportLines.map((line, index) => {
+      // Extract emoji, text, and username
+      const match = line.match(/(.*?)\s+-\s+@(\w+)$/);
+      if (match) {
+        return {
+          id: index,
+          content: match[1].trim(),
+          author: match[2],
+          timestamp: new Date().toISOString()
+        };
+      }
+      return {
+        id: index,
+        content: line.trim(),
+        author: 'citizen',
+        timestamp: new Date().toISOString()
+      };
+    });
+  };
+
   const handleFetchReports = async () => {
-    if (!city.trim()) return;
+    if (!location.trim()) return;
     try {
-      const data = await getSocialMedia(city.trim());
+      const data = await getSocialMedia(location.trim(), date || null);
+      console.log('Social Media API Response:', data);
       setReports(data);
+      
+      // Parse the reports string into array
+      // Check multiple possible paths for the reports string
+      let reportsString = null;
+      if (data?.data?.reports) {
+        reportsString = data.data.reports;
+      } else if (data?.reports) {
+        reportsString = data.reports;
+      }
+      
+      console.log('Reports String:', reportsString);
+      
+      if (reportsString) {
+        const parsed = parseReports(reportsString);
+        console.log('Parsed Reports:', parsed);
+        setParsedReports(parsed);
+      } else {
+        console.log('No reports found in response');
+        setParsedReports([]);
+      }
     } catch (error) {
-      // Error handled by hook
+      console.error('Error fetching reports:', error);
+      setParsedReports([]);
     }
+  };
+
+  const handleClearDate = () => {
+    setDate('');
   };
 
   return (
@@ -35,22 +104,43 @@ const SocialMedia = () => {
             <CardTitle>Search Social Media Reports</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex gap-4">
-              <Input
-                placeholder="Enter city name"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    handleFetchReports();
-                  }
-                }}
-                disabled={loading}
-                className="flex-1"
-              />
-              <Button onClick={handleFetchReports} loading={loading}>
-                Search
-              </Button>
+            <div className="space-y-4">
+              <div className="flex gap-4">
+                <Input
+                  placeholder="Enter location (e.g., Ashok Nagar, Chennai or Miami)"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleFetchReports();
+                    }
+                  }}
+                  disabled={loading}
+                  className="flex-1"
+                />
+                <Button onClick={handleFetchReports} loading={loading}>
+                  Search
+                </Button>
+              </div>
+              <div className="flex gap-4 items-center">
+                <Calendar size={18} className="text-gray-500" />
+                <Input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  disabled={loading}
+                  min={minDate}
+                  max={maxDate}
+                  className="flex-1"
+                  placeholder="Optional: Select date for reports"
+                />
+                {date && (
+                  <Button variant="outline" size="sm" onClick={handleClearDate}>
+                    Clear Date
+                  </Button>
+                )}
+               
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -61,9 +151,9 @@ const SocialMedia = () => {
         {/* Reports List */}
         {reports && (
           <div className="space-y-4">
-            {Array.isArray(reports.reports) && reports.reports.length > 0 ? (
-              reports.reports.map((report, index) => (
-                <Card key={index}>
+            {parsedReports && parsedReports.length > 0 ? (
+              parsedReports.map((report) => (
+                <Card key={report.id}>
                   <CardContent className="p-6">
                     <div className="flex items-start space-x-4">
                       <div className="flex-shrink-0">
@@ -108,7 +198,7 @@ const SocialMedia = () => {
                 <CardContent className="p-12 text-center">
                   <MessageSquare size={48} className="mx-auto text-gray-400 mb-4" />
                   <p className="text-gray-600 dark:text-gray-400">
-                    No reports found for {city}
+                    No reports found for {location}
                   </p>
                 </CardContent>
               </Card>
@@ -121,7 +211,7 @@ const SocialMedia = () => {
             <CardContent className="p-12 text-center">
               <MessageSquare size={48} className="mx-auto text-gray-400 mb-4" />
               <p className="text-gray-600 dark:text-gray-400">
-                Enter a city name to view social media reports
+                Enter a location to view social media reports
               </p>
             </CardContent>
           </Card>

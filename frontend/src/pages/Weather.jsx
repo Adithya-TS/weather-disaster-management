@@ -207,7 +207,7 @@ const Weather = () => {
                       <span className="text-sm text-gray-600 dark:text-gray-400">Location</span>
                       <p className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                         <MapPin size={18} />
-                        {weatherData.location || location}
+                        {weatherData.full_location || weatherData.location || location}
                       </p>
                     </div>
                     <div>
@@ -253,7 +253,7 @@ const Weather = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Calendar size={20} />
-                  Weather Forecast for {weatherData.location || location}
+                  Weather Forecast for {weatherData.full_location || weatherData.location || location}
                 </CardTitle>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
                   {weatherData.start_date} to {weatherData.end_date}
