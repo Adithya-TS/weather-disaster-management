@@ -70,11 +70,11 @@ const Sessions = () => {
                   <div className="flex-1">
                     <div className="flex items-center space-x-4 mb-2">
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        {session.city || 'Unknown City'}
+                        {session.city || session.location || 'Unknown Location'}
                       </h3>
                       {session.session_id && (
-                        <span className="text-xs font-mono text-gray-500 dark:text-gray-400">
-                          {session.session_id.substring(0, 8)}...
+                        <span className="text-xs font-mono text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
+                          {session.session_id}
                         </span>
                       )}
                     </div>
@@ -85,18 +85,10 @@ const Sessions = () => {
                           {formatDate(session.timestamp || session.created_at)}
                         </p>
                       </div>
-                      {session.duration && (
-                        <div>
-                          <span className="text-gray-600 dark:text-gray-400">Duration</span>
-                          <p className="text-gray-900 dark:text-gray-100">
-                            {formatDuration(session.duration)}
-                          </p>
-                        </div>
-                      )}
                       {session.disaster_type && (
                         <div>
-                          <span className="text-gray-600 dark:text-gray-400">Type</span>
-                          <p className="text-gray-900 dark:text-gray-100">
+                          <span className="text-gray-600 dark:text-gray-400">Disaster Type</span>
+                          <p className="text-gray-900 dark:text-gray-100 font-medium">
                             {session.disaster_type}
                           </p>
                         </div>
@@ -104,8 +96,21 @@ const Sessions = () => {
                       {session.severity && (
                         <div>
                           <span className="text-gray-600 dark:text-gray-400">Severity</span>
-                          <p className="text-gray-900 dark:text-gray-100">
+                          <p className={`font-medium ${
+                            session.severity === 'Critical' ? 'text-red-600 dark:text-red-400' :
+                            session.severity === 'High' ? 'text-orange-600 dark:text-orange-400' :
+                            session.severity === 'Medium' ? 'text-yellow-600 dark:text-yellow-400' :
+                            'text-green-600 dark:text-green-400'
+                          }`}>
                             {session.severity}
+                          </p>
+                        </div>
+                      )}
+                      {session.model && (
+                        <div>
+                          <span className="text-gray-600 dark:text-gray-400">Model</span>
+                          <p className="text-gray-900 dark:text-gray-100 text-xs">
+                            {session.model}
                           </p>
                         </div>
                       )}
@@ -122,7 +127,7 @@ const Sessions = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleViewSession(session.session_id || session.id)}
+                      onClick={() => handleViewSession(session.session_id || `session_${session.id}` || session.id)}
                     >
                       <Eye size={16} className="mr-1" />
                       View
@@ -154,9 +159,9 @@ const Sessions = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <span className="text-sm text-gray-600 dark:text-gray-400">City</span>
+                <span className="text-sm text-gray-600 dark:text-gray-400">Location</span>
                 <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {selectedSession.city || 'N/A'}
+                  {selectedSession.city || selectedSession.location || 'N/A'}
                 </p>
               </div>
               <div>
@@ -171,25 +176,59 @@ const Sessions = () => {
                   {formatDate(selectedSession.timestamp || selectedSession.created_at)}
                 </p>
               </div>
-              {selectedSession.duration && (
+              {selectedSession.model && (
                 <div>
-                  <span className="text-sm text-gray-600 dark:text-gray-400">Duration</span>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Model</span>
                   <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    {formatDuration(selectedSession.duration)}
+                    {selectedSession.model}
+                  </p>
+                </div>
+              )}
+              {selectedSession.disaster_type && (
+                <div>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Disaster Type</span>
+                  <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {selectedSession.disaster_type}
+                  </p>
+                </div>
+              )}
+              {selectedSession.severity && (
+                <div>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Severity</span>
+                  <p className={`text-lg font-semibold ${
+                    selectedSession.severity === 'Critical' ? 'text-red-600 dark:text-red-400' :
+                    selectedSession.severity === 'High' ? 'text-orange-600 dark:text-orange-400' :
+                    selectedSession.severity === 'Medium' ? 'text-yellow-600 dark:text-yellow-400' :
+                    'text-green-600 dark:text-green-400'
+                  }`}>
+                    {selectedSession.severity}
                   </p>
                 </div>
               )}
             </div>
+            
+            {selectedSession.input_text && (
+              <div>
+                <span className="text-sm text-gray-600 dark:text-gray-400 block mb-2 font-medium">
+                  Input Request
+                </span>
+                <div className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
+                  {selectedSession.input_text}
+                </div>
+              </div>
+            )}
+            
             {selectedSession.response_plan && (
               <div>
-                <span className="text-sm text-gray-600 dark:text-gray-400 block mb-2">
+                <span className="text-sm text-gray-600 dark:text-gray-400 block mb-2 font-medium">
                   Response Plan
                 </span>
                 <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 p-4 rounded-lg max-h-96 overflow-y-auto">
-                  {selectedSession.response_plan}
+                  {selectedSession.response_plan || selectedSession.output_text}
                 </pre>
               </div>
             )}
+            
             <div className="flex justify-end">
               <Button onClick={() => setModalOpen(false)}>Close</Button>
             </div>

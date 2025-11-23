@@ -75,13 +75,22 @@ disaster_analyzer_agent = LlmAgent(
     ),
     description="Analyzes weather data and social media to identify disaster type and severity",
     instruction="""
-    Execute ALL steps:
-    1. Call get_weather_data
-    2. Call get_social_media_reports
-    3. Call analyze_disaster_type with the weather and social data
-    4. YOU MUST write a text summary explaining the disaster type, severity, and reasoning
+    You are a disaster analysis expert. Your task is to analyze weather and social media data to identify disaster type and severity.
     
-    Always end with a summary sentence about the disaster situation.
+    Follow these steps in order:
+    1. Use the get_weather_data tool to fetch current weather conditions for the location
+    2. Use the get_social_media_reports tool to gather citizen reports and social media signals
+    3. Use the analyze_disaster_type tool with both the weather data and social media reports
+    4. Provide a clear text summary that includes:
+       - The identified disaster type (Hurricane, Flood, Tornado, Heatwave, Wildfire, etc.)
+       - The severity level (Critical, High, Medium, Low)
+       - Your reasoning based on the collected data
+    
+    IMPORTANT:
+    - Use the available tools (get_weather_data, get_social_media_reports, analyze_disaster_type)
+    - DO NOT write Python code or use print() statements
+    - DO NOT try to execute code - just use the tools provided
+    - Always end with a clear summary sentence about the disaster situation
     """,
     tools=[get_weather_data, get_social_media_reports, analyze_disaster_type]
 )
@@ -140,18 +149,30 @@ root_disaster_management_agent = LlmAgent(
     name="disaster_management_coordinator",
     model=Gemini(model="gemini-2.5-flash-lite", retry_options=retry_config),
     description="Coordinates complete disaster management workflow",
-    instruction="""
-    You coordinate disaster management. Execute ALL steps IN ORDER:
+    instruction=""" 
+    You are a disaster management coordinator. Your job is to orchestrate the complete workflow.
     
-    1. Transfer to disaster_analyzer_agent - get disaster analysis
-    2. Wait for analysis, then transfer to response_planner_agent - get response plan  
-    3. Wait for plan, then transfer to verification_agent - get approval
-    4. Wait for approval, then transfer to alert_agent - send alerts
-    5. After all steps complete, provide final summary
+    You have access to 4 specialized sub-agents that will be automatically called for you:
+    1. disaster_analyzer_agent - Analyzes weather and social media to identify disaster type and severity
+    2. response_planner_agent - Creates comprehensive response plans
+    3. verification_agent - Handles human verification and approval
+    4. alert_agent - Distributes emergency alerts
     
-    DO NOT stop until ALL 4 agents have completed their tasks.
-    Each agent will return their results - use those results for the next agent.
-    Complete the ENTIRE workflow before ending.
+    Workflow steps:
+    1. First, delegate the disaster analysis task. The disaster_analyzer_agent will automatically be called.
+    2. Once you receive the analysis results (disaster type and severity), delegate response planning to response_planner_agent.
+    3. After receiving the response plan, delegate verification to verification_agent.
+    4. Once verified, delegate alert distribution to alert_agent.
+    5. Finally, provide a comprehensive summary of the entire workflow.
+    
+    IMPORTANT:
+    - DO NOT write code or try to call functions like transfer_to_agent()
+    - DO NOT use print() statements or execute Python code
+    - Simply describe what needs to be done and the sub-agents will be automatically invoked
+    - Wait for each agent to complete before moving to the next step
+    - Complete ALL steps before ending your response
+    
+    When delegating, clearly state what information you need from each agent.
     """,
     sub_agents=[disaster_analyzer_agent, response_planner_agent, verification_agent, alert_agent]
 )

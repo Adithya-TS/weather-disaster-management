@@ -9,8 +9,9 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 import structlog
-from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi import FastAPI, HTTPException, Path, Query, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..main import WorkflowExecutor
 from ..tools.custom_tools import (
@@ -23,6 +24,11 @@ from ..tools.custom_tools import (
 )
 from ..memory.session_memory import StateManager, DisasterEvent
 from ..evaluation.agent_evaluation import EvaluationSuite
+from ..routes.auth_routes import router as auth_router
+from ..routes.chat_routes import router as chat_router
+from ..database.connection import init_db, get_db
+from ..api.dependencies import get_current_user
+from ..services.chat_service import ChatService
 from fastapi.middleware.cors import CORSMiddleware
 
 logger = structlog.get_logger("fastapi_app")
@@ -37,11 +43,15 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins="http://localhost:3000",  # Whitelist UI origin
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # Whitelist UI origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(auth_router)
+app.include_router(chat_router)
 
 # Instantiate executor once so sessions, logging, and plugins are reused.
 executor = WorkflowExecutor()
@@ -98,6 +108,12 @@ class EvaluationRequest(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     logger.info("fastapi.startup", log_file=executor.observability.get_log_file())
+    # Initialize database tables
+    try:
+        await init_db()
+    except Exception as e:
+        logger.error("fastapi.startup.db_init_error", error=str(e))
+        # Don't fail startup if DB is not available, but log the error
 
 
 @app.get("/healthz", tags=["System"])
@@ -287,17 +303,43 @@ async def send_alerts(payload: AlertRequest):
     response_model=DisasterResponse,
     tags=["Workflow"],
 )
-async def run_disaster_workflow(payload: DisasterRequest):
+async def run_disaster_workflow(
+    payload: DisasterRequest,
+    user_id: int = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
     """
     Execute the complete disaster-management workflow for a location.
     This runs the full agentic AI pipeline: analysis → planning → verification → alerts.
+    Requires authentication via JWT token.
+    Stores chat history after successful execution.
     """
-    logger.info("api.workflow.request", location=payload.location)
+    logger.info("api.workflow.request", location=payload.location, user_id=user_id)
+    
+    # Execute workflow
     result = await executor.execute(payload.location)
 
     if not result.get("success"):
         logger.error("api.workflow.failed", location=payload.location, error=result.get("error"))
         raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+    # Save chat history
+    try:
+        chat_service = ChatService(db)
+        input_text = f"Analyze and respond to weather disaster situation in {payload.location}"
+        output_text = result.get("response", "")
+        model = "gemini-2.5-flash-lite"  # Default model from executor
+        
+        await chat_service.save_chat(
+            user_id=user_id,
+            input_text=input_text,
+            output_text=output_text,
+            model=model
+        )
+        logger.info("api.workflow.chat_saved", user_id=user_id, location=payload.location)
+    except Exception as e:
+        # Log error but don't fail the request
+        logger.error("api.workflow.chat_save_error", error=str(e))
 
     logger.info("api.workflow.completed", location=payload.location, session_id=result.get("session_id"))
     return result
@@ -309,50 +351,151 @@ async def run_disaster_workflow(payload: DisasterRequest):
 
 @app.get("/api/v1/sessions", tags=["Sessions"])
 async def list_sessions(
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of sessions to return")
+    limit: int = Query(10, ge=1, le=100, description="Maximum number of sessions to return"),
+    user_id: int = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    List recent sessions (limited implementation - returns session info).
+    List recent sessions for the authenticated user.
+    Returns sessions from chat history (each workflow execution is a session).
     """
-    return {
-        "success": True,
-        "message": "Session listing - full implementation requires persistent storage",
-        "note": "Current implementation uses InMemorySessionService",
-        "timestamp": datetime.now().isoformat()
-    }
+    try:
+        chat_service = ChatService(db)
+        chat_history = await chat_service.get_user_chat_history(
+            user_id=user_id,
+            limit=limit,
+            offset=0
+        )
+        
+        # Transform chat history into session format
+        sessions = []
+        for chat in chat_history:
+            # Extract location from input text (format: "Analyze and respond to weather disaster situation in {location}")
+            input_text = chat.get("input_text", "")
+            location = "Unknown"
+            if "in " in input_text.lower():
+                try:
+                    location = input_text.split("in ")[-1].strip()
+                except:
+                    pass
+            
+            # Extract disaster info from output if available
+            output_text = chat.get("output_text", "")
+            disaster_type = None
+            severity = None
+            
+            # Try to extract disaster type and severity from output
+            if output_text:
+                output_lower = output_text.lower()
+                # Common disaster types
+                for dt in ["hurricane", "flood", "tornado", "heatwave", "wildfire", "earthquake", "tsunami"]:
+                    if dt in output_lower:
+                        disaster_type = dt.capitalize()
+                        break
+                
+                # Severity levels
+                for sev in ["critical", "high", "medium", "low"]:
+                    if sev in output_lower:
+                        severity = sev.capitalize()
+                        break
+            
+            session_data = {
+                "id": chat.get("id"),
+                "session_id": f"session_{chat.get('id')}",  # Generate session_id from chat id
+                "city": location,
+                "location": location,
+                "timestamp": chat.get("created_at"),
+                "created_at": chat.get("created_at"),
+                "disaster_type": disaster_type,
+                "severity": severity,
+                "response_plan": chat.get("output_text", "")[:500] if chat.get("output_text") else None,  # Truncate for list view
+                "model": chat.get("model"),
+                "duration": None,  # Not stored in chat history
+            }
+            sessions.append(session_data)
+        
+        return {
+            "success": True,
+            "sessions": sessions,
+            "count": len(sessions),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error("api.sessions.error", user_id=user_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve sessions: {str(e)}")
 
 
 @app.get("/api/v1/sessions/{session_id}", tags=["Sessions"])
 async def get_session(
-    session_id: str = Path(..., description="Session ID")
+    session_id: str = Path(..., description="Session ID"),
+    user_id: int = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
-    Get session details and history.
+    Get session details and history from chat history.
+    Session ID format: session_{chat_id} or just the chat_id number.
     """
     try:
-        session = await executor.session_service.get_session(
-            app_name=executor.app_name,
-            user_id=executor.user_id,
-            session_id=session_id
-        )
-        if not session:
+        # Extract chat ID from session_id (format: "session_123" or just "123")
+        chat_id_str = session_id.replace("session_", "").strip()
+        try:
+            chat_id = int(chat_id_str)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session ID format")
+        
+        # Get chat history entry
+        chat_service = ChatService(db)
+        chat = await chat_service.get_chat_by_id(chat_id, user_id)
+        
+        if not chat:
             raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Extract location from input text
+        input_text = chat.get("input_text", "")
+        location = "Unknown"
+        if "in " in input_text.lower():
+            try:
+                location = input_text.split("in ")[-1].strip()
+            except:
+                pass
+        
+        # Extract disaster info from output
+        output_text = chat.get("output_text", "")
+        disaster_type = None
+        severity = None
+        
+        if output_text:
+            output_lower = output_text.lower()
+            for dt in ["hurricane", "flood", "tornado", "heatwave", "wildfire", "earthquake", "tsunami"]:
+                if dt in output_lower:
+                    disaster_type = dt.capitalize()
+                    break
+            
+            for sev in ["critical", "high", "medium", "low"]:
+                if sev in output_lower:
+                    severity = sev.capitalize()
+                    break
         
         return {
             "success": True,
             "session_id": session_id,
-            "session": {
-                "id": session_id,
-                "app_name": executor.app_name,
-                "user_id": executor.user_id,
-                "message_count": len(session.messages) if hasattr(session, 'messages') else 0
-            },
-            "timestamp": datetime.now().isoformat()
+            "id": chat.get("id"),
+            "city": location,
+            "location": location,
+            "timestamp": chat.get("created_at"),
+            "created_at": chat.get("created_at"),
+            "disaster_type": disaster_type,
+            "severity": severity,
+            "response_plan": chat.get("output_text", ""),
+            "model": chat.get("model"),
+            "input_text": chat.get("input_text", ""),
+            "output_text": chat.get("output_text", ""),
+            "duration": None
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("api.session.error", session_id=session_id, error=str(e))
+        logger.error("api.session.error", session_id=session_id, user_id=user_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to get session: {str(e)}")
 
 

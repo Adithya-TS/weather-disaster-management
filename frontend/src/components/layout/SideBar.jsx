@@ -11,6 +11,7 @@ const SideBar = ({ isOpen, onClose }) => {
     { path: '/analysis', label: 'Analysis', icon: AlertTriangle },
     { path: '/response-plan', label: 'Response Plan', icon: FileText },
     { path: '/sessions', label: 'Sessions', icon: History },
+    { path: '/chat-history', label: 'Chat History', icon: MessageSquare },
   ];
 
   const isActive = (path) => {

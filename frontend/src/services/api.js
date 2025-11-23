@@ -10,9 +10,13 @@ const apiClient = axios.create({
   },
 });
 
-// Request interceptor
+// Request interceptor - add JWT token if available
 apiClient.interceptors.request.use(
   (config) => {
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
   },
   (error) => {
@@ -37,6 +41,12 @@ apiClient.interceptors.response.use(
     if (error.response) {
       switch (error.response.status) {
         case 401:
+          // Unauthorized - clear auth and redirect to login
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_user');
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
           break;
         case 403:
           break;
@@ -100,6 +110,14 @@ export const apiService = {
   // Evaluation
   runEvaluation: () => apiClient.post('/api/v1/evaluate'),
   runBenchmark: () => apiClient.get('/api/v1/evaluate/benchmark'),
+
+  // Authentication
+  googleLogin: (data) => apiClient.post('/auth/google/callback', data),
+
+  // Chat history
+  getChatHistory: (limit = 50, offset = 0) => 
+    apiClient.get(`/chat/history?limit=${limit}&offset=${offset}`),
+  getChatById: (chatId) => apiClient.get(`/chat/history/${chatId}`),
 };
 
 export default apiClient;
