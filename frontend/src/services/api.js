@@ -93,6 +93,15 @@ export const apiService = {
     return apiClient.get(`/api/v1/social-media/${encodeURIComponent(location)}${queryString ? '?' + queryString : ''}`);
   },
 
+  // Route weather analysis
+  getRouteWeather: (startCity, endCity, date) => {
+    const params = new URLSearchParams();
+    params.append('start', startCity);
+    params.append('end', endCity);
+    if (date) params.append('date', date);
+    return apiClient.get(`/api/v1/route-weather?${params.toString()}`);
+  },
+
   // Analyze disaster
   analyzeDisaster: (data) => apiClient.post('/api/v1/analyze', data),
 
@@ -107,6 +116,11 @@ export const apiService = {
 
   // Full workflow
   executeWorkflow: (location) => apiClient.post('/api/v1/disaster-response', { location }),
+
+  // Seismic monitoring
+  getEarthquakes: (data) => apiClient.post('/api/v1/earthquakes', data),
+  getTsunamiWarnings: (data) => apiClient.post('/api/v1/tsunami-warnings', data),
+  seismicFactCheck: (data) => apiClient.post('/api/v1/seismic-fact-check', data),
 
   // Session management
   getSessions: (limit = 10) => apiClient.get(`/api/v1/sessions?limit=${limit}`),

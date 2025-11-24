@@ -14,8 +14,10 @@ const NavBar = ({ onMenuClick }) => {
   const navItems = [
     { path: '/', label: 'Home' },
     { path: '/weather', label: 'Weather' },
+    { path: '/seismic-monitor', label: 'Seismic Monitor' },
+    { path: '/route-planning', label: 'Route Planning' },
     { path: '/social-media', label: 'Social Media' },
-    { path: '/analysis', label: 'Analysis' },
+    { path: '/analysis', label: 'Fact Check' },
     { path: '/response-plan', label: 'Response Plan' },
     { path: '/sessions', label: 'Sessions' },
     { path: '/chat-history', label: 'Chat History' },

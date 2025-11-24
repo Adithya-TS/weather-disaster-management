@@ -21,6 +21,14 @@ from ..tools.custom_tools import (
     generate_response_plan,
     send_emergency_alerts,
     verify_with_human,
+    geocode_location,
+)
+from ..tools.route_planning import get_route_weather_analysis
+from ..tools.seismic_tools import (
+    get_earthquake_data,
+    get_tsunami_warnings,
+    assess_earthquake_risk,
+    fact_check_earthquake_claim,
 )
 from ..memory.session_memory import StateManager, DisasterEvent
 from ..evaluation.agent_evaluation import EvaluationSuite
@@ -96,6 +104,21 @@ class PlanRequest(BaseModel):
 class AlertRequest(BaseModel):
     response_plan: str = Field(..., description="The response plan to send as alerts")
     channels: Optional[List[str]] = Field(None, description="Alert channels (defaults to all)")
+
+
+class EarthquakeRequest(BaseModel):
+    location: Optional[str] = Field(None, description="Location name (will be geocoded)")
+    latitude: Optional[float] = Field(None, description="Latitude for center of search")
+    longitude: Optional[float] = Field(None, description="Longitude for center of search")
+    radius_km: int = Field(500, description="Search radius in kilometers")
+    min_magnitude: float = Field(2.5, description="Minimum earthquake magnitude")
+    days: int = Field(7, description="Number of days to look back")
+
+
+class TsunamiRequest(BaseModel):
+    location: Optional[str] = Field(None, description="Location name (will be geocoded)")
+    latitude: Optional[float] = Field(None, description="Latitude")
+    longitude: Optional[float] = Field(None, description="Longitude")
 
 
 class VerifyRequest(BaseModel):
@@ -211,31 +234,99 @@ async def get_social_media(
         raise HTTPException(status_code=500, detail=f"Failed to fetch social media reports: {str(e)}")
 
 
-@app.post("/api/v1/analyze", tags=["Tools"])
-async def analyze_disaster(payload: AnalyzeRequest):
+@app.get("/api/v1/route-weather", tags=["Route Planning"])
+async def get_route_weather(
+    start: str = Query(..., description="Starting city", min_length=2),
+    end: str = Query(..., description="Destination city", min_length=2),
+    date: Optional[str] = Query(None, description="Date for forecast (YYYY-MM-DD format)")
+):
     """
-    Analyze disaster type and severity from weather and social media data.
-    Can use provided data or fetch fresh data.
+    Analyze weather conditions along a route between two cities.
+    Uses Google Maps Directions API for accurate route detection.
+    Returns weather data for all major cities along the route with travel recommendations.
+    
+    Date:
+    - YYYY-MM-DD format (e.g., 2025-11-24)
+    - Accepts dates from today up to 3 days ahead
+    
+    Example: /api/v1/route-weather?start=Chennai&end=Trichy&date=2025-11-25
     """
     try:
-        # Fetch data if not provided
-        weather = payload.weather_data or get_weather_data(payload.location)
-        social = payload.social_reports or get_social_media_reports(payload.location)
+        # Validate date if provided
+        if date:
+            try:
+                from datetime import datetime, timedelta
+                date_obj = datetime.strptime(date, "%Y-%m-%d")
+                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                max_date = today + timedelta(days=3)
+                
+                if date_obj < today:
+                    raise HTTPException(status_code=400, detail="Date cannot be in the past")
+                if date_obj > max_date:
+                    raise HTTPException(status_code=400, detail="Date cannot be more than 3 days in the future")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Date must be in YYYY-MM-DD format")
         
-        # Analyze
-        analysis = analyze_disaster_type(weather, social)
+        route_analysis = get_route_weather_analysis(start, end, date)
+        return route_analysis
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("api.route_weather.error", start=start, end=end, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to analyze route weather: {str(e)}")
+
+
+@app.post("/api/v1/analyze", tags=["Tools"])
+async def fact_check_weather_claim(payload: AnalyzeRequest):
+    """
+    Fact-check weather or seismic claims against official data from reliable sources.
+    Verifies user reports/claims with actual meteorological and seismic data.
+    """
+    try:
+        # Geocode location
+        geo_data = geocode_location(payload.location)
+        if not geo_data:
+            raise HTTPException(status_code=400, detail=f"Could not geocode location: {payload.location}")
+        
+        latitude = geo_data["lat"]
+        longitude = geo_data["lon"]
+        
+        # User's claim
+        user_claim = payload.weather_data or payload.social_reports
+        
+        if not user_claim:
+            raise HTTPException(status_code=400, detail="Please provide a weather or seismic claim to verify")
+        
+        user_claim_lower = user_claim.lower()
+        
+        # Check if claim is about earthquakes/tsunamis
+        is_seismic_claim = any(word in user_claim_lower for word in 
+                               ["earthquake", "quake", "tremor", "seismic", "tsunami", "tidal wave"])
+        
+        if is_seismic_claim:
+            # Use seismic fact-checking
+            verification = fact_check_earthquake_claim(user_claim, latitude, longitude, payload.location)
+            claim_type = "seismic"
+        else:
+            # Use weather fact-checking
+            official_weather = get_weather_data(payload.location)
+            from ..tools.custom_tools import fact_check_weather_claim as verify_weather_claim
+            verification = verify_weather_claim(user_claim, official_weather, payload.location)
+            claim_type = "weather"
         
         return {
             "success": True,
             "location": payload.location,
-            "analysis": analysis,
-            "weather_data": weather,
-            "social_reports": social,
+            "claim_type": claim_type,
+            "user_claim": user_claim,
+            "verification": verification,
             "timestamp": datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error("api.analyze.error", location=payload.location, error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to analyze disaster: {str(e)}")
+        logger.error("api.fact_check.error", location=payload.location, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to verify claim: {str(e)}")
 
 
 @app.post("/api/v1/plan", tags=["Tools"])
@@ -285,21 +376,158 @@ async def verify_plan(payload: VerifyRequest):
 async def send_alerts(payload: AlertRequest):
     """
     Send emergency alerts through multiple channels.
-    Direct access to alert distribution tool.
+    Direct access to alert broadcasting tool.
     """
     try:
-        alert_status = send_emergency_alerts(
+        result = send_emergency_alerts(
             payload.response_plan,
             payload.channels
         )
         return {
             "success": True,
-            "alert_status": alert_status,
+            "result": result,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
         logger.error("api.alerts.error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to send alerts: {str(e)}")
+
+
+# ============================================================================
+# Seismic & Tsunami Monitoring Endpoints
+# ============================================================================
+
+@app.post("/api/v1/earthquakes", tags=["Seismic"])
+async def get_earthquakes(payload: EarthquakeRequest):
+    """
+    Get recent earthquake data from USGS.
+    Search by location name or coordinates.
+    """
+    try:
+        latitude = payload.latitude
+        longitude = payload.longitude
+        
+        # Geocode location if provided
+        if payload.location and (latitude is None or longitude is None):
+            geo_data = geocode_location(payload.location)
+            if geo_data:
+                latitude = geo_data["lat"]
+                longitude = geo_data["lon"]
+            else:
+                raise HTTPException(status_code=400, detail=f"Could not geocode location: {payload.location}")
+        
+        earthquake_data = get_earthquake_data(
+            latitude=latitude,
+            longitude=longitude,
+            radius_km=payload.radius_km,
+            min_magnitude=payload.min_magnitude,
+            days=payload.days
+        )
+        
+        # Add risk assessment for each earthquake if location provided
+        if latitude is not None and longitude is not None:
+            for eq in earthquake_data.get("earthquakes", []):
+                if eq.get("latitude") and eq.get("longitude"):
+                    # Calculate distance
+                    from math import radians, sin, cos, sqrt, atan2
+                    R = 6371  # Earth radius in km
+                    
+                    lat1, lon1 = radians(latitude), radians(longitude)
+                    lat2, lon2 = radians(eq["latitude"]), radians(eq["longitude"])
+                    
+                    dlat = lat2 - lat1
+                    dlon = lon2 - lon1
+                    
+                    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+                    c = 2 * atan2(sqrt(a), sqrt(1-a))
+                    distance = R * c
+                    
+                    eq["distance_km"] = round(distance, 2)
+                    
+                    # Add risk assessment
+                    if eq.get("magnitude") and eq.get("depth_km"):
+                        risk = assess_earthquake_risk(
+                            eq["magnitude"],
+                            eq["depth_km"],
+                            distance
+                        )
+                        eq["risk_assessment"] = risk
+        
+        return earthquake_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("api.earthquakes.error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to fetch earthquake data: {str(e)}")
+
+
+@app.post("/api/v1/tsunami-warnings", tags=["Seismic"])
+async def get_tsunami_alerts(payload: TsunamiRequest):
+    """
+    Get active tsunami warnings from NOAA/NWS.
+    Search by location name or coordinates.
+    """
+    try:
+        latitude = payload.latitude
+        longitude = payload.longitude
+        
+        # Geocode location if provided
+        if payload.location and (latitude is None or longitude is None):
+            geo_data = geocode_location(payload.location)
+            if geo_data:
+                latitude = geo_data["lat"]
+                longitude = geo_data["lon"]
+            else:
+                raise HTTPException(status_code=400, detail=f"Could not geocode location: {payload.location}")
+        
+        tsunami_data = get_tsunami_warnings(latitude, longitude)
+        
+        return tsunami_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("api.tsunami.error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to fetch tsunami warnings: {str(e)}")
+
+
+@app.post("/api/v1/seismic-fact-check", tags=["Seismic"])
+async def seismic_fact_check(payload: AnalyzeRequest):
+    """
+    Fact-check earthquake/tsunami claims against official USGS and NOAA data.
+    """
+    try:
+        # Geocode location
+        geo_data = geocode_location(payload.location)
+        if not geo_data:
+            raise HTTPException(status_code=400, detail=f"Could not geocode location: {payload.location}")
+        
+        latitude = geo_data["lat"]
+        longitude = geo_data["lon"]
+        
+        # User's claim (can be in weather_data or social_reports field)
+        user_claim = payload.weather_data or payload.social_reports
+        
+        if not user_claim:
+            raise HTTPException(status_code=400, detail="Please provide a seismic claim to verify")
+        
+        # Fact-check the claim
+        verification = fact_check_earthquake_claim(user_claim, latitude, longitude, payload.location)
+        
+        return {
+            "success": True,
+            "location": payload.location,
+            "user_claim": user_claim,
+            "verification": verification,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("api.seismic_fact_check.error", location=payload.location, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to verify claim: {str(e)}")
 
 
 # ============================================================================
@@ -318,7 +546,7 @@ async def run_disaster_workflow(
 ):
     """
     Execute the complete disaster-management workflow for a location.
-    This runs the full agentic AI pipeline: analysis → planning → verification → alerts.
+    This runs the full agentic AI pipeline: analysis -> planning -> verification -> alerts.
     Requires authentication via JWT token.
     Stores chat history after successful execution.
     """

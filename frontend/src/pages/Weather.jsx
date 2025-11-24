@@ -21,9 +21,12 @@ const Weather = () => {
       const start = isForecastMode && startDate ? startDate : null;
       const end = isForecastMode && endDate ? endDate : null;
       const response = await getWeather(location.trim(), start, end);
-      const data = response?.data?.weather_data || response?.data || response;
+      
+      // Extract weather_data from the nested response structure
+      const data = response?.weather_data || response?.data?.weather_data || response?.data || response;
       setWeatherData(data);
     } catch (error) {
+      console.error('Weather fetch error:', error);
       // Error handled by hook
     }
   };

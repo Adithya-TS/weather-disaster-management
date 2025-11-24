@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { X, Home, Cloud, MessageSquare, AlertTriangle, FileText, History } from 'lucide-react';
+import { X, Home, Cloud, MessageSquare, AlertTriangle, FileText, History, Navigation, Activity } from 'lucide-react';
 
 const SideBar = ({ isOpen, onClose }) => {
   const location = useLocation();
@@ -7,8 +7,10 @@ const SideBar = ({ isOpen, onClose }) => {
   const menuItems = [
     { path: '/', label: 'Home', icon: Home },
     { path: '/weather', label: 'Weather', icon: Cloud },
+    { path: '/seismic-monitor', label: 'Seismic Monitor', icon: Activity },
+    { path: '/route-planning', label: 'Route Planning', icon: Navigation },
     { path: '/social-media', label: 'Social Media', icon: MessageSquare },
-    { path: '/analysis', label: 'Analysis', icon: AlertTriangle },
+    { path: '/analysis', label: 'Fact Check', icon: AlertTriangle },
     { path: '/response-plan', label: 'Response Plan', icon: FileText },
     { path: '/sessions', label: 'Sessions', icon: History },
     { path: '/chat-history', label: 'Chat History', icon: MessageSquare },

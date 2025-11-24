@@ -5,181 +5,206 @@ import Card, { CardHeader, CardTitle, CardDescription, CardContent } from '../co
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import Loader from '../components/ui/Loader';
-import { AlertTriangle } from 'lucide-react';
-import { getSeverityColor, getDisasterIcon } from '../utils/helpers';
+import { Shield, CheckCircle, XCircle, AlertTriangle, Info } from 'lucide-react';
 
 const Analysis = () => {
   const [location, setLocation] = useState('');
-  const [weatherData, setWeatherData] = useState('');
-  const [socialReports, setSocialReports] = useState('');
-  const [analysisResult, setAnalysisResult] = useState(null);
+  const [userClaim, setUserClaim] = useState('');
+  const [factCheckResult, setFactCheckResult] = useState(null);
   const { analyzeDisaster, loading } = useWorkflow();
 
-  const handleAnalyze = async () => {
-    if (!location.trim()) return;
+  const handleFactCheck = async () => {
+    if (!location.trim() || !userClaim.trim()) return;
 
     try {
       const data = await analyzeDisaster({
         location: location.trim(),
-        weather_data: weatherData || undefined,
-        social_reports: socialReports || undefined,
+        weather_data: userClaim.trim(),
       });
-      setAnalysisResult(data);
+      setFactCheckResult(data);
     } catch (error) {
       // Error handled by hook
     }
   };
 
+  const getVerdictColor = (verdict) => {
+    if (verdict === 'VERIFIED') return 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-300 border-green-300';
+    if (verdict === 'FALSE') return 'bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-300 border-red-300';
+    if (verdict === 'PARTIALLY TRUE' || verdict === 'PARTIALLY FALSE') return 'bg-yellow-100 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-300 border-yellow-300';
+    return 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300 border-gray-300';
+  };
+
+  const getVerdictIcon = (verdict) => {
+    if (verdict === 'VERIFIED') return <CheckCircle className="w-6 h-6 text-green-600" />;
+    if (verdict === 'FALSE') return <XCircle className="w-6 h-6 text-red-600" />;
+    if (verdict === 'PARTIALLY TRUE' || verdict === 'PARTIALLY FALSE') return <AlertTriangle className="w-6 h-6 text-yellow-600" />;
+    return <Info className="w-6 h-6 text-gray-600" />;
+  };
+
   return (
     <PageContainer
-      title="Disaster Analysis"
-      description="Analyze disaster type and severity based on weather and social media data"
+      title="Disaster Fact Check"
+      description="Verify weather, earthquake, and tsunami claims against official data from reliable sources"
     >
       <div className="space-y-6">
         {/* Input Card */}
         <Card>
           <CardHeader>
-            <CardTitle>Analyze Disaster</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Shield className="w-5 h-5" />
+              Fact Check Disaster Claim
+            </CardTitle>
             <CardDescription>
-              Enter location (area, city, or village) and optionally provide weather data or social media reports
+              Verify weather, earthquake, or tsunami claims against official data sources (OpenWeatherMap, USGS, NOAA)
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <Input
                 label="Location"
-                placeholder="e.g., Ashok Nagar, Chennai or Seruvamani, Thiruvarur"
+                placeholder="e.g., Chennai, Mumbai, Delhi"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
                 required
               />
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Weather Data (Optional)
+                  Disaster Claim to Verify <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  rows="3"
-                  placeholder="Paste weather data JSON or leave empty to fetch automatically"
-                  value={weatherData}
-                  onChange={(e) => setWeatherData(e.target.value)}
+                  rows="4"
+                  placeholder="e.g., 'Heavy rain with thunderstorms', 'Earthquake of magnitude 5.2', 'Tsunami warning issued', 'Hot and sunny weather'"
+                  value={userClaim}
+                  onChange={(e) => setUserClaim(e.target.value)}
+                  required
                 />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Enter weather, earthquake, or tsunami reports you want to verify
+                </p>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Social Media Reports (Optional)
-                </label>
-                <textarea
-                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  rows="3"
-                  placeholder="Paste social media reports JSON or leave empty to fetch automatically"
-                  value={socialReports}
-                  onChange={(e) => setSocialReports(e.target.value)}
-                />
-              </div>
-              <Button onClick={handleAnalyze} loading={loading} fullWidth>
-                Analyze Disaster
+              <Button onClick={handleFactCheck} loading={loading} fullWidth disabled={!location.trim() || !userClaim.trim()}>
+                <Shield className="w-4 h-4 mr-2" />
+                Verify Claim
               </Button>
             </div>
           </CardContent>
         </Card>
 
         {/* Loading */}
-        {loading && <Loader message="Analyzing disaster..." />}
+        {loading && <Loader message="Verifying claim against official weather data..." />}
 
-        {/* Analysis Result */}
-        {analysisResult && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
+        {/* Fact Check Result */}
+        {factCheckResult && factCheckResult.verification && (
+          <div className="space-y-6">
+            {/* Verdict Card */}
+            <Card className={`border-2 ${getVerdictColor(factCheckResult.verification.verdict)}`}>
               <CardHeader>
-                <CardTitle>Analysis Result</CardTitle>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {getVerdictIcon(factCheckResult.verification.verdict)}
+                    <div>
+                      <CardTitle className="text-xl">{factCheckResult.verification.verdict}</CardTitle>
+                      <p className="text-sm mt-1">Confidence: {factCheckResult.verification.confidence}%</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Location</p>
+                    <p className="font-semibold">{factCheckResult.location}</p>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <span className="text-sm text-gray-600 dark:text-gray-400">Location</span>
-                    <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {analysisResult.location || location}
+            </Card>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* User Claim */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Your Claim</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <p className="text-gray-800 dark:text-gray-200">
+                      "{factCheckResult.user_claim}"
                     </p>
                   </div>
-                  <div>
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      Disaster Type
-                    </span>
-                    <div className="flex items-center space-x-2 mt-1">
-                      <span className="text-2xl">{getDisasterIcon(analysisResult.disaster_type)}</span>
-                      <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        {analysisResult.disaster_type || 'None'}
-                      </p>
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-sm text-gray-600 dark:text-gray-400">Severity</span>
-                    <div className="mt-1">
-                      <span
-                        className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${getSeverityColor(
-                          analysisResult.severity
-                        )}`}
-                      >
-                        {analysisResult.severity || 'Unknown'}
-                      </span>
-                    </div>
-                  </div>
-                  {analysisResult.confidence && (
-                    <div>
-                      <span className="text-sm text-gray-600 dark:text-gray-400">
-                        Confidence
-                      </span>
-                      <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        {(analysisResult.confidence * 100).toFixed(1)}%
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Details</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {analysisResult.analysis && (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                      <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                        {analysisResult.analysis}
-                      </p>
-                    </div>
+              {/* Official Weather */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Official Weather Data</CardTitle>
+                  <CardDescription>From OpenWeatherMap API</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                    <p className="text-gray-800 dark:text-gray-200">
+                      {factCheckResult.verification.official_summary}
+                    </p>
                   </div>
-                )}
-                {analysisResult.recommendations && (
-                  <div className="mt-4">
-                    <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2">
-                      Recommendations
-                    </h4>
-                    <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
-                      {Array.isArray(analysisResult.recommendations)
-                        ? analysisResult.recommendations.map((rec, idx) => (
-                            <li key={idx}>{rec}</li>
-                          ))
-                        : (
-                          <li>{analysisResult.recommendations}</li>
-                        )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Verification Details */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Matches */}
+              {factCheckResult.verification.matches && factCheckResult.verification.matches.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-green-700 dark:text-green-400">
+                      <CheckCircle className="w-5 h-5" />
+                      Verified Facts
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-2">
+                      {factCheckResult.verification.matches.map((match, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-gray-700 dark:text-gray-300">
+                          <span className="text-green-600 dark:text-green-400 mt-0.5">✓</span>
+                          <span>{match}</span>
+                        </li>
+                      ))}
                     </ul>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Discrepancies */}
+              {factCheckResult.verification.discrepancies && factCheckResult.verification.discrepancies.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-red-700 dark:text-red-400">
+                      <XCircle className="w-5 h-5" />
+                      Discrepancies Found
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-2">
+                      {factCheckResult.verification.discrepancies.map((disc, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-gray-700 dark:text-gray-300">
+                          <span className="text-red-600 dark:text-red-400 mt-0.5">✗</span>
+                          <span>{disc}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           </div>
         )}
 
-        {!analysisResult && !loading && (
+        {!factCheckResult && !loading && (
           <Card>
             <CardContent className="p-12 text-center">
-              <AlertTriangle size={48} className="mx-auto text-gray-400 mb-4" />
-              <p className="text-gray-600 dark:text-gray-400">
-                Enter a location to analyze disaster situation
+              <Shield size={48} className="mx-auto text-gray-400 mb-4" />
+              <p className="text-gray-600 dark:text-gray-400 mb-2">
+                Enter a location and weather claim to fact-check
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
+                Supports weather (OpenWeatherMap), earthquakes (USGS), and tsunamis (NOAA)
               </p>
             </CardContent>
           </Card>

@@ -21,6 +21,8 @@ import ResponsePlan from './pages/ResponsePlan';
 import Sessions from './pages/Sessions';
 import Login from './pages/Login';
 import ChatHistory from './pages/ChatHistory';
+import RoutePlanning from './pages/RoutePlanning';
+import SeismicMonitor from './pages/SeismicMonitor';
 
 const AppContent = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -60,10 +62,26 @@ const AppContent = () => {
               }
             />
             <Route
-              path="/social-media"
+              path="/route-planning"
               element={
                 <ProtectedRoute>
-                  <SocialMedia />
+                  <RoutePlanning />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/seismic-monitor"
+              element={
+                <ProtectedRoute>
+                  <SeismicMonitor />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/analysis"
+              element={
+                <ProtectedRoute>
+                  <Analysis />
                 </ProtectedRoute>
               }
             />
