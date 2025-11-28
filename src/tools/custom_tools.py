@@ -544,6 +544,7 @@ def get_social_media_reports(location: str, context: str = "", date: Optional[st
     # Try to get real social media data first
     try:
         real_reports = get_real_social_media_reports(location, limit=10)
+        logger.info("social_media_tool.fetched", location=location, count=len(real_reports))
         
         if real_reports and len(real_reports) > 0:
             # Format real reports
@@ -551,8 +552,16 @@ def get_social_media_reports(location: str, context: str = "", date: Optional[st
             for report in real_reports:
                 source = report.get("platform", "Social Media")
                 author = report.get("author", "User")
-                content = report.get("content", "").replace("\n", " ")[:150]
-                formatted_reports.append(f"📱 [{source}] {content} - @{author}")
+                content = (report.get("content", "") or "").replace("\n", " ")
+                url = report.get("url", "")
+                timestamp = report.get("timestamp", "")
+                # Include full content and helpful metadata
+                line = f"📱 [{source}] {content} - @{author}"
+                if timestamp:
+                    line += f" | {timestamp}"
+                if url:
+                    line += f" | {url}"
+                formatted_reports.append(line)
             
             if date:
                 try:
@@ -670,6 +679,177 @@ def get_social_media_reports(location: str, context: str = "", date: Optional[st
         current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     return f"Social Media Reports for {location} (Collected on: {current_date}):\n" + "\n".join(reports)
+
+
+def validate_social_media_reports(location: str, reports_string: str, date: Optional[str] = None) -> str:
+    """
+    Validate social media reports against official weather data to detect misinformation.
+    Checks if reports match the specified date and weather conditions.
+    
+    Args:
+        location: Location being monitored
+        reports_string: String containing social media reports
+        date: Optional date to validate against (YYYY-MM-DD). If None, uses current date.
+        
+    Returns:
+        Validation summary with fact-check results
+    """
+    try:
+        # Determine the target date for validation
+        if date:
+            try:
+                target_date = datetime.strptime(date, "%Y-%m-%d")
+                date_str = date
+            except ValueError:
+                target_date = datetime.now()
+                date_str = target_date.strftime("%Y-%m-%d")
+        else:
+            target_date = datetime.now()
+            date_str = target_date.strftime("%Y-%m-%d")
+        
+        # Check if this is historical (more than 1 day old) or current/future
+        days_diff = (datetime.now().date() - target_date.date()).days
+        
+        # Get weather data for the specific date
+        if days_diff > 1:
+            # Historical data - would need historical weather API (not available in free tier)
+            return f"⚠️ Cannot validate reports for {date_str} - historical weather data not available. Validation only works for current day ±1 day."
+        elif days_diff < -7:
+            # Too far in future
+            return f"⚠️ Cannot validate reports for {date_str} - date is too far in the future."
+        else:
+            # Current or recent data - use current weather as reference
+            weather_data = get_weather_data(location)
+        
+        if not isinstance(weather_data, dict) or not weather_data.get("success"):
+            return f"⚠️ Unable to validate reports - weather data unavailable for {location}"
+        
+        # Parse individual reports and check timestamps
+        report_lines = [line.strip() for line in reports_string.split('\n') if line.strip() and not line.startswith('Social Media Reports')]
+        
+        if not report_lines:
+            return "No reports to validate"
+        
+        validated_reports = []
+        total_reports = len(report_lines)
+        verified_count = 0
+        false_count = 0
+        unverified_count = 0
+        date_mismatch_count = 0
+        
+        logger.info("social_media_validation.start", location=location, date=date_str, total_reports=total_reports)
+        
+        for idx, report in enumerate(report_lines[:10], 1):  # Validate up to 10 reports
+            # Extract timestamp from report if present
+            report_timestamp = None
+            report_date_str = None
+            if ' | ' in report:
+                parts = report.split(' | ')
+                if len(parts) >= 2:
+                    timestamp_str = parts[1].strip()
+                    try:
+                        # Parse ISO format timestamp
+                        report_timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                        report_date = report_timestamp.date()
+                        report_date_str = report_timestamp.strftime("%Y-%m-%d")
+                        
+                        # Check if report is within acceptable range (7 days from validation date)
+                        target_date_obj = target_date.date()
+                        days_difference = abs((report_date - target_date_obj).days)
+                        
+                        # Only flag as mismatch if report is more than 7 days old or from future
+                        if days_difference > 7:
+                            date_mismatch_count += 1
+                            validated_reports.append(f"⏰ Report #{idx}: DATE OUT OF RANGE - Report from {report_date_str} is {days_difference} days away from validation date {date_str}")
+                            continue
+                    except (ValueError, AttributeError):
+                        pass  # If parsing fails, continue with content validation
+            
+            # Extract content (remove emoji, platform, author, metadata)
+            content = report
+            if '📱' in content:
+                content = content.split('📱')[1] if '📱' in content else content
+            if ']' in content:
+                content = content.split(']', 1)[1] if ']' in content else content
+            if ' - @' in content:
+                content = content.split(' - @')[0]
+            if ' | ' in content:
+                content = content.split(' | ')[0]
+            content = content.strip()
+            
+            # Fact-check this report
+            fact_check_result = fact_check_weather_claim(content, weather_data, location)
+            
+            verdict = fact_check_result.get("verdict", "UNVERIFIED")
+            confidence = fact_check_result.get("confidence", 0)
+            
+            # Count verdicts
+            if "VERIFIED" in verdict or "TRUE" in verdict:
+                verified_count += 1
+                status_emoji = "✅"
+            elif "FALSE" in verdict or "UNLIKELY" in verdict:
+                false_count += 1
+                status_emoji = "❌"
+            else:
+                unverified_count += 1
+                status_emoji = "⚠️"
+            
+            # Format validation result
+            validation_line = f"{status_emoji} Report #{idx}: {verdict} (Confidence: {confidence}%)"
+            if report_timestamp:
+                days_old = (datetime.now().date() - report_timestamp.date()).days
+                age_note = f" | From: {report_timestamp.strftime('%Y-%m-%d %H:%M')} ({days_old}d ago)" if days_old > 0 else f" | From: {report_timestamp.strftime('%Y-%m-%d %H:%M')} (today)"
+                validation_line += age_note
+            if fact_check_result.get("discrepancies"):
+                validation_line += f"\n   Discrepancies: {'; '.join(fact_check_result['discrepancies'][:2])}"
+            if fact_check_result.get("matches"):
+                validation_line += f"\n   Matches: {'; '.join(fact_check_result['matches'][:2])}"
+            
+            validated_reports.append(validation_line)
+        
+        # Generate summary
+        accuracy_rate = (verified_count / total_reports * 100) if total_reports > 0 else 0
+        misinformation_rate = (false_count / total_reports * 100) if total_reports > 0 else 0
+        
+        summary = f"""
+📊 SOCIAL MEDIA VALIDATION REPORT for {location}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🗓️  Validation Date: {date_str}
+🌤️  Official Weather: {weather_data.get('condition', 'N/A')}, {weather_data.get('temperature', 'N/A')}°C
+         Humidity: {weather_data.get('humidity', 'N/A')}%, Wind: {weather_data.get('wind_speed', 'N/A')} km/h
+
+📈 Validation Statistics:
+  • Total Reports Analyzed: {total_reports}
+  • ✅ Verified/Accurate: {verified_count} ({accuracy_rate:.1f}%)
+  • ❌ False/Misleading: {false_count} ({misinformation_rate:.1f}%)
+  • ⚠️ Unverified: {unverified_count}
+    • ⏰ Date Mismatches: {date_mismatch_count}
+
+{'🚨 HIGH MISINFORMATION RATE DETECTED!' if misinformation_rate > 30 else '✅ Reports generally align with official data' if accuracy_rate > 70 else '⚠️ Mixed accuracy - verify critical information'}
+{f'⚠️ WARNING: {date_mismatch_count} reports are outside the 7-day validation window!' if date_mismatch_count > 0 else ''}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Individual Report Validation:
+{chr(10).join(validated_reports)}
+
+💡 Recommendation: {'Cross-reference critical reports with official sources before taking action.' if misinformation_rate > 20 else 'Reports appear reliable but always verify emergency information.'}
+{'⚠️ Note: Validation is against current weather for {date_str}. Historical accuracy may vary.' if days_diff != 0 else ''}
+"""
+        
+        logger.info("social_media_validation.complete", 
+                   location=location,
+                                     date=date_str,
+                   verified=verified_count,
+                   false=false_count,
+                                     date_mismatches=date_mismatch_count,
+                   accuracy=accuracy_rate)
+        
+        return summary.strip()
+        
+    except Exception as e:
+        logger.error("social_media_validation.error", location=location, error=str(e))
+        return f"⚠️ Error validating reports: {str(e)}"
 
 
 def fact_check_weather_claim(user_claim: str, official_weather: Any, location: str) -> Dict[str, Any]:

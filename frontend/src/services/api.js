@@ -93,6 +93,19 @@ export const apiService = {
     return apiClient.get(`/api/v1/social-media/${encodeURIComponent(location)}${queryString ? '?' + queryString : ''}`);
   },
 
+  // Social media reports with validation
+  validateSocialMedia: (location, date) => {
+    const params = new URLSearchParams();
+    if (date) params.append('date', date);
+    const queryString = params.toString();
+    return apiClient.get(`/api/v1/social-media/validate/${encodeURIComponent(location)}${queryString ? '?' + queryString : ''}`);
+  },
+
+  // Validate a single social media report line
+  validateSocialMediaItem: (location, report, date) => {
+    return apiClient.post('/api/v1/social-media/validate-item', { location, report, date });
+  },
+
   // Route weather analysis
   getRouteWeather: (startCity, endCity, date) => {
     const params = new URLSearchParams();

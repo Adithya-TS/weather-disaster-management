@@ -67,6 +67,14 @@ const AppContent = () => {
               element={
                 <ProtectedRoute>
                   <Alerts />
+                    </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/social-media"
+              element={
+                <ProtectedRoute>
+                  <SocialMedia />
                 </ProtectedRoute>
               }
             />

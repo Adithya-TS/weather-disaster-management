@@ -28,6 +28,7 @@ retry_config = types.HttpRetryOptions(
 from ..tools.custom_tools import (
     get_weather_data,
     get_social_media_reports,
+    validate_social_media_reports,
     analyze_disaster_type,
     generate_response_plan,
     send_emergency_alerts,
@@ -54,15 +55,16 @@ weather_data_agent = LlmAgent(
 social_media_agent = LlmAgent(
     name="social_media_agent",
     model=Gemini(model="gemini-2.5-flash-lite", retry_options=retry_config),
-    description="Monitors social media for disaster-related reports",
+    description="Monitors social media for disaster-related reports and validates them against official weather data",
     instruction="""
-    You collect social media reports. When called:
-    1. Use get_social_media_reports tool for the city
-    2. Summarize key findings
+    You collect and validate social media reports. When called:
+    1. Use get_social_media_reports tool for the city to get reports
+    2. Use validate_social_media_reports tool with the location and reports to fact-check them
+    3. Summarize key findings and highlight any misinformation detected
     
-    You are a sub-agent - just provide the reports, don't end the conversation.
+    You are a sub-agent - just provide the validated reports, don't end the conversation.
     """,
-    tools=[get_social_media_reports]
+    tools=[get_social_media_reports, validate_social_media_reports]
 )
 
 # Disaster Analysis Agent

@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 import structlog
-from fastapi import FastAPI, HTTPException, Path, Query, Depends
+from fastapi import FastAPI, HTTPException, Path, Query, Depends, Body
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from ..main import WorkflowExecutor
 from ..tools.custom_tools import (
     get_weather_data,
     get_social_media_reports,
+    validate_social_media_reports,
     analyze_disaster_type,
     generate_response_plan,
     send_emergency_alerts,
@@ -218,7 +219,8 @@ async def get_weather(
 async def get_social_media(
     location: str = Path(..., description="Location (area, city, village)", min_length=2),
     context: Optional[str] = Query(None, description="Additional context"),
-    date: Optional[str] = Query(None, description="Date for reports (YYYY-MM-DD format)")
+    date: Optional[str] = Query(None, description="Date for reports (YYYY-MM-DD format)"),
+    validate: bool = Query(False, description="Set true to run fact-check validation against official weather")
 ):
     """
     Get social media reports for a location.
@@ -227,16 +229,75 @@ async def get_social_media(
     """
     try:
         reports = get_social_media_reports(location, context or "", date)
-        return {
+        payload = {
             "success": True,
             "location": location,
             "date": date or datetime.now().strftime("%Y-%m-%d"),
             "reports": reports,
             "timestamp": datetime.now().isoformat()
         }
+
+        if validate:
+            try:
+                validation = validate_social_media_reports(location, reports, date)
+                payload["validation"] = validation
+            except Exception as ve:
+                logger.warning("api.social_media.validation_failed", location=location, error=str(ve))
+                payload["validation_error"] = f"Validation failed: {str(ve)}"
+
+        return payload
     except Exception as e:
         logger.error("api.social_media.error", location=location, error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to fetch social media reports: {str(e)}")
+
+@app.get("/api/v1/social-media/validate/{location}", tags=["Tools"])
+async def validate_social_media(
+    location: str = Path(..., description="Location (area, city, village)", min_length=2),
+    context: Optional[str] = Query(None, description="Additional context"),
+    date: Optional[str] = Query(None, description="Date for reports (YYYY-MM-DD format)")
+):
+    """
+    Fetch social media reports and validate them against official weather data.
+    Returns both the raw reports and a validation summary.
+    """
+    try:
+        reports = get_social_media_reports(location, context or "", date)
+        validation = validate_social_media_reports(location, reports, date)
+        return {
+            "success": True,
+            "location": location,
+            "date": date or datetime.now().strftime("%Y-%m-%d"),
+            "reports": reports,
+            "validation": validation,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error("api.social_media.validate.error", location=location, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to validate social media reports: {str(e)}")
+
+@app.post("/api/v1/social-media/validate-item", tags=["Tools"])
+async def validate_social_media_item(
+    location: str = Body(..., embed=True, description="Location (area, city, village)"),
+    report: str = Body(..., embed=True, description="Single social media report line to validate"),
+    date: Optional[str] = Body(None, embed=True, description="Date to validate against (YYYY-MM-DD)")
+):
+    """
+    Validate a single social media report line against official weather data for the specified date.
+    Returns a compact validation summary for that item.
+    """
+    try:
+        reports_string = f"Social Media Reports for {location} (Collected on: {date or datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):\n{report}"
+        summary = validate_social_media_reports(location, reports_string, date)
+        return {
+            "success": True,
+            "location": location,
+            "date": date or datetime.now().strftime("%Y-%m-%d"),
+            "summary": summary,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error("api.social_media.validate_item.error", location=location, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to validate report: {str(e)}")
 
 
 @app.get("/api/v1/route-weather", tags=["Route Planning"])

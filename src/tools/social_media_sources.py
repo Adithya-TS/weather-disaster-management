@@ -7,7 +7,9 @@ import os
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import structlog
+from dotenv import load_dotenv
 
+load_dotenv()
 logger = structlog.get_logger()
 
 
@@ -170,7 +172,7 @@ class NewsSource:
     def initialize(self):
         """Initialize News API client"""
         if not self.api_key:
-            logger.warning("news.no_api_key")
+            logger.warning("news.no_api_key", key_present=bool(self.api_key))
             return False
             
         try:
@@ -199,11 +201,11 @@ class NewsSource:
         reports = []
         
         try:
-            # Search for weather-related news
-            query = f"{location} AND (weather OR storm OR disaster OR flood OR rain)"
+            # Search for weather-related news with broader query
+            query = f"{location} weather"
             
-            # Get articles from the past 24 hours
-            from_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            # Get articles from the past 7 days (free tier often has delays)
+            from_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
             
             articles = self.client.get_everything(
                 q=query,
@@ -214,18 +216,26 @@ class NewsSource:
             )
             
             if articles.get("status") == "ok":
+                total_articles = len(articles.get("articles", []))
+                logger.info("news.api_response", status="ok", total_articles=total_articles, location=location)
                 for article in articles.get("articles", []):
+                    # Prefer full content when available; fall back to description
+                    full_content = article.get("content") or article.get("description") or ""
+                    # Compose readable text with title + content
+                    composed = (article.get("title", "") + "\n" + full_content).strip()
                     reports.append({
                         "source": "News",
                         "platform": article.get("source", {}).get("name", "News"),
-                        "author": article.get("author", "News Agency"),
-                        "content": article.get("title", "") + "\n" + (article.get("description", "") or ""),
+                        "author": article.get("author") or article.get("source", {}).get("name", "News"),
+                        "content": composed,
                         "timestamp": article.get("publishedAt", datetime.now().isoformat()),
                         "url": article.get("url", ""),
                         "location": location
                     })
                 
                 logger.info("news.fetched", count=len(reports), location=location)
+            else:
+                logger.warning("news.api_failed", status=articles.get("status"), location=location)
             
             return reports[:limit]
             
