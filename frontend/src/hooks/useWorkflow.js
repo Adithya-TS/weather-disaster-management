@@ -99,10 +99,18 @@ export const useWorkflow = () => {
 
   const sendAlerts = useCallback(
     async (data) => {
-      return execute(() => apiService.sendAlerts(data), {
-        showSuccessToast: true,
-        successMessage: 'Alerts sent successfully',
-      });
+      console.log('🔄 useWorkflow.sendAlerts called with:', data);
+      try {
+        const result = await execute(() => apiService.sendAlerts(data), {
+          showSuccessToast: false,  // We'll handle success message in the component
+          showErrorToast: true,
+        });
+        console.log('✅ useWorkflow.sendAlerts result:', result);
+        return result;
+      } catch (error) {
+        console.error('❌ useWorkflow.sendAlerts error:', error);
+        throw error;
+      }
     },
     [execute]
   );

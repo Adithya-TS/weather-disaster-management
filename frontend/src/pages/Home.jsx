@@ -63,7 +63,7 @@ const Home = () => {
 
   return (
     <PageContainer
-      title="Weather Disaster Management"
+      title="Climasentinel"
       description="Monitor, analyze, and respond to weather-related disasters"
     >
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -26,7 +26,7 @@ const NavBar = ({ onMenuClick }) => {
             </button>
             <Link to="/" className="flex items-center ml-2 lg:ml-0">
               <span className="text-xl font-bold text-primary-600 dark:text-primary-400">
-                Weather Disaster Management
+                Climasentinel
               </span>
             </Link>
           </div>

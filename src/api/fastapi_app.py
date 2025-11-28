@@ -107,6 +107,8 @@ class PlanRequest(BaseModel):
 class AlertRequest(BaseModel):
     response_plan: str = Field(..., description="The response plan to send as alerts")
     channels: Optional[List[str]] = Field(None, description="Alert channels (defaults to all)")
+    location: Optional[str] = Field(None, description="Location for the alert (optional)")
+    send_to_email: Optional[str] = Field(None, description="Send directly to this email address (optional, bypasses subscriptions)")
 
 
 class EarthquakeRequest(BaseModel):
@@ -376,21 +378,251 @@ async def verify_plan(payload: VerifyRequest):
 
 
 @app.post("/api/v1/alerts", tags=["Tools"])
-async def send_alerts(payload: AlertRequest):
+async def send_alerts(
+    payload: AlertRequest,
+    user_id: int = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
     """
     Send emergency alerts through multiple channels.
-    Direct access to alert broadcasting tool.
+    Now sends REAL email notifications!
+    
+    Options:
+    1. send_to_email: Send directly to a specific email (bypasses subscriptions)
+    2. Auto-detect: Finds active alerts and sends to all subscribers
+    3. Simulation: Shows what channels would be used
     """
     try:
-        result = send_emergency_alerts(
+        from ..services.notification_service import NotificationService
+        from ..services.alert_service import AlertService
+        from ..models import User, Alert, AlertType, SeverityLevel
+        from sqlalchemy import select
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        import os
+        
+        # Track results
+        email_sent = False
+        emails_sent_count = 0
+        alert_location = payload.location or "Unknown Location"
+        
+        # Option 1: Send directly to specified email (for testing/direct sending)
+        if payload.send_to_email:
+            notification_service = NotificationService(db)
+            
+            # Get current user info
+            stmt = select(User).where(User.id == user_id)
+            result = await db.execute(stmt)
+            current_user = result.scalar_one_or_none()
+            
+            if not current_user:
+                raise HTTPException(status_code=404, detail="User not found")
+            
+            # Create a temporary alert for the response plan
+            temp_alert = Alert(
+                id=999998,  # Dummy ID
+                alert_type=AlertType.STORM,
+                severity=SeverityLevel.HIGH,
+                title="📋 Emergency Response Plan - Immediate Action Required",
+                description=f"Response plan for {alert_location}:\n\n{payload.response_plan[:500]}...",
+                location=alert_location,
+                temperature=None,
+                wind_speed=None,
+                precipitation=None,
+                humidity=None,
+                is_active=True,
+                is_sent=False,
+                detected_at=datetime.utcnow()
+            )
+            
+            # Create temp user object with specified email (not a DB model instance)
+            # Using a simple object instead of User model to avoid DB constraints
+            class TempUser:
+                def __init__(self, user_id, email, name):
+                    self.id = user_id
+                    self.email = email
+                    self.name = name
+            
+            temp_user = TempUser(
+                user_id=user_id,
+                email=payload.send_to_email,
+                name=current_user.name or "Emergency Responder"
+            )
+            
+            # Send email using notification service
+            try:
+                # Create email content
+                subject = f"🚨 EMERGENCY RESPONSE PLAN: {alert_location}"
+                
+                html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0;">
+        <h1 style="margin: 0; font-size: 24px;">🚨 Emergency Response Plan</h1>
+        <p style="margin: 10px 0 0 0; font-size: 16px;">Immediate Action Required</p>
+    </div>
+    
+    <div style="background: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+        <p style="margin: 0 0 20px 0;">Hi {temp_user.name},</p>
+        
+        <div style="background: white; padding: 20px; border-left: 4px solid #ef4444; margin-bottom: 20px; border-radius: 5px;">
+            <h2 style="margin: 0 0 10px 0; color: #ef4444; font-size: 20px;">📋 Response Plan for {alert_location}</h2>
+            <p style="margin: 0; font-size: 14px; white-space: pre-wrap;">{payload.response_plan}</p>
+        </div>
+        
+        <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+            <p style="margin: 0; font-weight: bold;">⚠️ This is an automatically generated response plan.</p>
+            <p style="margin: 10px 0 0 0;">Follow local authority instructions and emergency protocols.</p>
+        </div>
+        
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+        
+        <p style="font-size: 14px; color: #6b7280; margin: 0;">
+            Sent via Weather Disaster Management System
+            <br>
+            Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
+        </p>
+    </div>
+</body>
+</html>
+"""
+                
+                text_body = f"""
+EMERGENCY RESPONSE PLAN
+{'=' * 60}
+
+Location: {alert_location}
+Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
+
+RESPONSE PLAN:
+{'-' * 60}
+{payload.response_plan}
+
+{'=' * 60}
+This is an automatically generated response plan.
+Follow local authority instructions and emergency protocols.
+
+Sent via Weather Disaster Management System
+"""
+                
+                # Create message
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = subject
+                msg['From'] = f"{notification_service.from_name} <{notification_service.from_email}>"
+                msg['To'] = payload.send_to_email
+                
+                # Attach both versions
+                part1 = MIMEText(text_body, 'plain')
+                part2 = MIMEText(html_body, 'html')
+                msg.attach(part1)
+                msg.attach(part2)
+                
+                # Check SMTP configuration
+                if not notification_service.smtp_user or not notification_service.smtp_password:
+                    return {
+                        "success": False,
+                        "error": "SMTP not configured",
+                        "message": "⚠️ Email cannot be sent - SMTP credentials not set in .env file",
+                        "note": "Set SMTP_USER and SMTP_PASSWORD in your .env file to send real emails"
+                    }
+                
+                # Send email
+                with smtplib.SMTP(notification_service.smtp_host, notification_service.smtp_port) as server:
+                    server.starttls()
+                    server.login(notification_service.smtp_user, notification_service.smtp_password)
+                    server.send_message(msg)
+                
+                email_sent = True
+                emails_sent_count = 1
+                
+                logger.info("api.alerts.direct_email_sent",
+                           email=payload.send_to_email,
+                           location=alert_location)
+                
+                return {
+                    "success": True,
+                    "email_notifications_sent": True,
+                    "emails_sent": 1,
+                    "recipient": payload.send_to_email,
+                    "message": f"✅ Response plan email sent to {payload.send_to_email}",
+                    "timestamp": datetime.now().isoformat(),
+                    "note": "Check the inbox for the emergency response plan email!"
+                }
+                
+            except smtplib.SMTPAuthenticationError:
+                return {
+                    "success": False,
+                    "error": "SMTP Authentication Failed",
+                    "message": "⚠️ Email authentication failed",
+                    "help": "If using Gmail, you need an App Password (not your regular password)",
+                    "guide": "See EMAIL_SETUP_TESTING_GUIDE.md for setup instructions"
+                }
+            except Exception as e:
+                logger.error("api.alerts.direct_email_error", error=str(e))
+                return {
+                    "success": False,
+                    "error": f"Failed to send email: {str(e)}",
+                    "message": "⚠️ Email sending failed - check SMTP configuration"
+                }
+        
+        # Option 2: Send to subscribers of active alerts
+        alert_service = AlertService(db)
+        active_alerts = await alert_service.get_active_alerts(location=payload.location, severity=None)
+        
+        if active_alerts and len(active_alerts) > 0:
+            notification_service = NotificationService(db)
+            
+            for alert in active_alerts[:1]:  # Process first active alert
+                alert_location = alert.location
+                notification_result = await notification_service.send_alert_notifications(alert)
+                
+                if notification_result.get("success"):
+                    email_sent = True
+                    emails_sent_count = notification_result.get("sent", 0)
+                    
+                    # Mark alert as sent
+                    await alert_service.mark_alert_as_sent(alert.id)
+                    
+                    logger.info("api.alerts.subscriber_emails_sent", 
+                               alert_id=alert.id,
+                               subscribers=emails_sent_count,
+                               location=alert.location)
+                    break
+            
+            if email_sent:
+                return {
+                    "success": True,
+                    "email_notifications_sent": True,
+                    "subscribers_notified": emails_sent_count,
+                    "alert_location": alert_location,
+                    "message": f"✅ Emails sent to {emails_sent_count} subscriber(s) for {alert_location}",
+                    "timestamp": datetime.now().isoformat()
+                }
+        
+        # Option 3: No emails sent - return simulation
+        simulated_result = send_emergency_alerts(
             payload.response_plan,
             payload.channels
         )
+        
         return {
             "success": True,
-            "result": result,
-            "timestamp": datetime.now().isoformat()
+            "email_notifications_sent": False,
+            "subscribers_notified": 0,
+            "message": "⚠️ No active alerts or subscribers. Showing simulated distribution.",
+            "simulation_result": simulated_result,
+            "timestamp": datetime.now().isoformat(),
+            "note": "To send real emails, either: 1) Add 'send_to_email' field, or 2) Have active alerts with subscribers"
         }
+            
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("api.alerts.error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to send alerts: {str(e)}")

@@ -19,6 +19,13 @@ logger = structlog.get_logger("alert_routes")
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
 
+# Test Email Request
+class TestEmailRequest(BaseModel):
+    """Request to test email sending."""
+    email: str = Field(..., description="Email address to send test alert to")
+    location: str = Field(default="Test Location", description="Location for test alert")
+
+
 # Request/Response Models
 class AlertCreateRequest(BaseModel):
     """Request to create a new alert."""
@@ -96,6 +103,168 @@ class SubscriptionResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# Test Email Endpoint
+
+@router.post("/test-email")
+async def test_email_alert(
+    request: TestEmailRequest,
+    user_id: int = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Send a test email alert to a specific email address.
+    This endpoint bypasses subscriptions and sends directly to the provided email.
+    Useful for testing email configuration.
+    """
+    try:
+        from ..models import User, Alert, AlertType, SeverityLevel
+        from ..services.notification_service import NotificationService
+        from datetime import datetime, timedelta
+        
+        # Get current user
+        stmt = select(User).where(User.id == user_id)
+        result = await db.execute(stmt)
+        current_user = result.scalar_one_or_none()
+        
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Create a test alert (not saved to DB)
+        test_alert = Alert(
+            id=999999,  # Dummy ID
+            alert_type=AlertType.STORM,
+            severity=SeverityLevel.MEDIUM,
+            title="🧪 Test Alert - Email Configuration Test",
+            description=(
+                f"This is a test alert to verify email notifications are working correctly. "
+                f"Sent at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} to test email delivery system."
+            ),
+            location=request.location,
+            city="Test City",
+            state="Test State",
+            country="Test Country",
+            latitude=0.0,
+            longitude=0.0,
+            temperature=25.0,
+            wind_speed=45.0,
+            precipitation=10.5,
+            humidity=80.0,
+            is_active=True,
+            is_sent=False,
+            detected_at=datetime.utcnow(),
+            expires_at=datetime.utcnow() + timedelta(hours=24)
+        )
+        
+        # Create a test user with the provided email
+        test_user = User(
+            id=user_id,
+            email=request.email,
+            name=current_user.name or "Test User",
+            provider="test"
+        )
+        
+        # Send email
+        notification_service = NotificationService(db)
+        
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        import os
+        
+        # Create email content
+        subject = f"🧪 TEST ALERT: Email Configuration Test"
+        html_body = notification_service._create_email_html(test_user, test_alert)
+        text_body = notification_service._create_email_text(test_user, test_alert)
+        
+        # Create message
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = f"{notification_service.from_name} <{notification_service.from_email}>"
+        msg['To'] = request.email
+        
+        # Attach both text and HTML versions
+        part1 = MIMEText(text_body, 'plain')
+        part2 = MIMEText(html_body, 'html')
+        msg.attach(part1)
+        msg.attach(part2)
+        
+        # Check SMTP configuration
+        smtp_configured = bool(notification_service.smtp_user and notification_service.smtp_password)
+        
+        if not smtp_configured:
+            logger.warning("test_email.smtp_not_configured",
+                         message="SMTP credentials not set in .env file")
+            return {
+                "success": False,
+                "error": "SMTP not configured. Please set SMTP_USER and SMTP_PASSWORD in your .env file",
+                "help": {
+                    "gmail": "Use Gmail App Password (not regular password)",
+                    "setup_guide": "See ALERTS_SETUP_GUIDE.md for instructions",
+                    "required_env_vars": [
+                        "SMTP_HOST=smtp.gmail.com",
+                        "SMTP_PORT=587",
+                        "SMTP_USER=your-email@gmail.com",
+                        "SMTP_PASSWORD=your-app-password",
+                        "FROM_EMAIL=your-email@gmail.com"
+                    ]
+                }
+            }
+        
+        # Try to send email
+        try:
+            with smtplib.SMTP(notification_service.smtp_host, notification_service.smtp_port) as server:
+                server.starttls()
+                server.login(notification_service.smtp_user, notification_service.smtp_password)
+                server.send_message(msg)
+            
+            logger.info("test_email.sent",
+                       email=request.email,
+                       user_id=user_id)
+            
+            return {
+                "success": True,
+                "message": f"Test email sent successfully to {request.email}",
+                "smtp_host": notification_service.smtp_host,
+                "from_email": notification_service.from_email,
+                "details": "Check your inbox (and spam folder) for the test alert email"
+            }
+            
+        except smtplib.SMTPAuthenticationError:
+            logger.error("test_email.auth_error", email=request.email)
+            return {
+                "success": False,
+                "error": "SMTP Authentication Failed",
+                "help": {
+                    "gmail": "If using Gmail, you need an App Password (not your regular password)",
+                    "steps": [
+                        "1. Go to https://myaccount.google.com/security",
+                        "2. Enable 2-Step Verification",
+                        "3. Go to App Passwords",
+                        "4. Create new app password for 'Mail'",
+                        "5. Use that 16-character password in SMTP_PASSWORD"
+                    ]
+                }
+            }
+            
+        except Exception as e:
+            logger.error("test_email.send_error", email=request.email, error=str(e))
+            return {
+                "success": False,
+                "error": f"Failed to send email: {str(e)}",
+                "smtp_config": {
+                    "host": notification_service.smtp_host,
+                    "port": notification_service.smtp_port,
+                    "user": notification_service.smtp_user[:5] + "***" if notification_service.smtp_user else "NOT SET"
+                }
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("test_email.error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to send test email: {str(e)}")
 
 
 # Alert Endpoints
