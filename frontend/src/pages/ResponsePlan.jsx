@@ -27,26 +27,97 @@ const ResponsePlan = () => {
   }, [location.state]);
 
   const handleVerify = async () => {
-    if (!workflowData?.response_plan) return;
+    console.log('🔍 Verify Plan button clicked!');
+    console.log('📋 Workflow data:', workflowData);
+    
+    // Check if we have the weather analysis response
+    if (!workflowData?.response) {
+      console.error('❌ No response data in workflow!');
+      showSuccess('⚠️ No weather analysis available. Please run disaster analysis first.');
+      return;
+    }
+    
     try {
-      await verifyPlan({ response_plan: workflowData.response_plan });
+      console.log('📤 Sending verify request...');
+      const result = await verifyPlan({ response_plan: workflowData.response });  // ← FIXED: Use 'response' field
+      
+      console.log('✅ Verify response:', result);
       setVerificationModalOpen(false);
-      showSuccess('Plan verified successfully');
+      showSuccess('✅ Plan verified successfully!');
     } catch (error) {
+      console.error('❌ Verify plan error:', error);
       // Error handled by hook
     }
   };
 
   const handleSendAlerts = async () => {
-    if (!workflowData?.response_plan) return;
+    console.log('🚀 Send Alerts button clicked!');
+    console.log('📋 Workflow data:', workflowData);
+    
+    // Check if we have the weather analysis response
+    if (!workflowData?.response) {
+      console.error('❌ No response data in workflow!');
+      showSuccess('⚠️ No weather analysis available. Please run disaster analysis first.');
+      return;
+    }
+    
     try {
-      await sendAlerts({
-        response_plan: workflowData.response_plan,
+      // Get user email from localStorage auth_user
+      let userEmail = null;
+      try {
+        const authUser = localStorage.getItem('auth_user');
+        if (authUser) {
+          const user = JSON.parse(authUser);
+          userEmail = user.email;
+          console.log('📧 User email:', userEmail);
+        }
+      } catch (e) {
+        console.error('❌ Failed to get user email:', e);
+      }
+      
+      const location = workflowData.display_location || workflowData.full_location || workflowData.city || workflowData.location || 'Unknown Location';
+      
+      console.log('📍 Location:', location);
+      console.log('📢 Alert channels:', alertChannels);
+      
+      // Use 'response' field (the weather analysis) as the response_plan
+      const payload = {
+        response_plan: workflowData.response,  // ← FIXED: Use 'response' field
         channels: alertChannels,
+        location: location,
+        send_to_email: userEmail || undefined
+      };
+      
+      console.log('📤 Sending alert payload (truncated):', {
+        ...payload,
+        response_plan: payload.response_plan.substring(0, 100) + '...'
       });
+      
+      const result = await sendAlerts(payload);
+      
+      console.log('✅ Alert response:', result);
+      
       setAlertModalOpen(false);
-      showSuccess('Alerts sent successfully');
+      
+      // Show appropriate success message based on result
+      // Check if result has data property (axios response) or is direct data
+      const responseData = result?.data || result;
+      
+      if (responseData?.email_notifications_sent) {
+        if (responseData.emails_sent && responseData.emails_sent > 0) {
+          showSuccess(`✅ Email alert sent to ${responseData.recipient || 'your email'}! Check your inbox.`);
+        } else if (responseData.subscribers_notified > 0) {
+          showSuccess(`✅ Email alerts sent to ${responseData.subscribers_notified} subscriber(s)!`);
+        } else {
+          showSuccess('✅ Alert sent successfully!');
+        }
+      } else if (responseData?.success) {
+        showSuccess(responseData.message || '✅ Alerts sent successfully!');
+      } else {
+        showSuccess('✅ Alert broadcast initiated!');
+      }
     } catch (error) {
+      console.error('❌ Send alerts error:', error);
       // Error handled by hook
     }
   };
