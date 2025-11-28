@@ -15,6 +15,7 @@ import { useAuth } from './context/AuthContext';
 // Pages
 import Home from './pages/Home';
 import Weather from './pages/Weather';
+import Alerts from './pages/Alerts';
 import SocialMedia from './pages/SocialMedia';
 import Analysis from './pages/Analysis';
 import ResponsePlan from './pages/ResponsePlan';
@@ -39,10 +40,10 @@ const AppContent = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {showLayout && <NavBar onMenuClick={() => setSidebarOpen(true)} />}
+      {showLayout && <NavBar onMenuClick={() => setSidebarOpen(!sidebarOpen)} />}
       <div className="flex">
         {showLayout && <SideBar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />}
-        <main className={showLayout ? "flex-1 lg:ml-64" : "flex-1"}>
+        <main className={showLayout ? "flex-1 lg:ml-64 pt-16" : "flex-1"}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route
@@ -58,6 +59,14 @@ const AppContent = () => {
               element={
                 <ProtectedRoute>
                   <Weather />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/alerts"
+              element={
+                <ProtectedRoute>
+                  <Alerts />
                 </ProtectedRoute>
               }
             />

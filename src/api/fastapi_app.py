@@ -34,9 +34,11 @@ from ..memory.session_memory import StateManager, DisasterEvent
 from ..evaluation.agent_evaluation import EvaluationSuite
 from ..routes.auth_routes import router as auth_router
 from ..routes.chat_routes import router as chat_router
+from ..routes.alert_routes import router as alert_router
 from ..database.connection import init_db, get_db
 from ..api.dependencies import get_current_user
 from ..services.chat_service import ChatService
+from ..api.enhanced_disaster_response import get_enhanced_disaster_analysis
 from fastapi.middleware.cors import CORSMiddleware
 
 logger = structlog.get_logger("fastapi_app")
@@ -51,7 +53,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # Whitelist UI origins
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:3001"],  # Whitelist UI origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,6 +62,7 @@ app.add_middleware(
 # Include routers
 app.include_router(auth_router)
 app.include_router(chat_router)
+app.include_router(alert_router)
 
 # Instantiate executor once so sessions, logging, and plugins are reused.
 executor = WorkflowExecutor()
@@ -545,15 +548,15 @@ async def run_disaster_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Execute the complete disaster-management workflow for a location.
-    This runs the full agentic AI pipeline: analysis -> planning -> verification -> alerts.
+    Execute enhanced disaster analysis with real-time weather data and severity detection.
+    Shows actual weather metrics and automatic severity assessment.
     Requires authentication via JWT token.
     Stores chat history after successful execution.
     """
     logger.info("api.workflow.request", location=payload.location, user_id=user_id)
     
-    # Execute workflow
-    result = await executor.execute(payload.location)
+    # Execute enhanced disaster analysis with real weather data
+    result = await get_enhanced_disaster_analysis(payload.location, db)
 
     if not result.get("success"):
         logger.error("api.workflow.failed", location=payload.location, error=result.get("error"))
@@ -562,9 +565,9 @@ async def run_disaster_workflow(
     # Save chat history
     try:
         chat_service = ChatService(db)
-        input_text = f"Analyze and respond to weather disaster situation in {payload.location}"
+        input_text = f"Weather disaster analysis for {payload.location}"
         output_text = result.get("response", "")
-        model = "gemini-2.5-flash-lite"  # Default model from executor
+        model = "enhanced-weather-detector"
         
         await chat_service.save_chat(
             user_id=user_id,
@@ -577,8 +580,22 @@ async def run_disaster_workflow(
         # Log error but don't fail the request
         logger.error("api.workflow.chat_save_error", error=str(e))
 
-    logger.info("api.workflow.completed", location=payload.location, session_id=result.get("session_id"))
-    return result
+    logger.info("api.workflow.completed", location=payload.location)
+    
+    # Format response to match expected DisasterResponse model
+    return DisasterResponse(
+        success=True,
+        location=payload.location,
+        city=result.get("city"),
+        state=result.get("state"),
+        country=result.get("country"),
+        full_location=result.get("location"),
+        session_id=result.get("session_id"),
+        response=result.get("response"),
+        raw_response=result.get("raw_weather_data"),
+        duration=result.get("duration", 0.0),
+        timestamp=result.get("timestamp")
+    )
 
 
 # ============================================================================
