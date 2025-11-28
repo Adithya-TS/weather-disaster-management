@@ -9,37 +9,175 @@ import os
 import requests
 import structlog
 from datetime import datetime
+from google.genai import Client
 
 from .custom_tools import geocode_location, get_weather_data
 
 logger = structlog.get_logger()
 
 
+def verify_route_with_ai(start_city: str, end_city: str, cities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Use Gemini AI to verify and filter the route cities to only major ones.
+    
+    Args:
+        start_city: Starting city
+        end_city: Ending city
+        cities: List of cities found on route
+        
+    Returns:
+        Filtered list of only major cities
+    """
+    try:
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            logger.warning("route.ai_verify.no_api_key")
+            return cities  # Return as-is if no AI available
+        
+        client = Client(api_key=api_key)
+        
+        # Prepare city list for AI
+        city_list = [f"{c['name']} ({c['distance_from_start']} km)" for c in cities]
+        
+        prompt = f"""You are a route planning expert for India. 
+        
+Route: {start_city} to {end_city}
+Cities found: {', '.join(city_list)}
+
+Task: Filter this list to show ONLY major cities (population > 100,000 or district headquarters). 
+Remove small towns, suburbs, and neighborhoods.
+
+For Chennai to Trichy route, major cities would be: Chennai, Chengalpattu, Tindivanam, Villupuram, Cuddalore, Chidambaram, Kumbakonam, Trichy
+For Chennai to Nagapattinam: Chennai, Mahabalipuram, Puducherry, Cuddalore, Chidambaram, Mayiladuthurai, Nagapattinam
+
+Return ONLY the city names that are major cities, one per line, no explanations.
+If a city appears in the list, include it. Keep 5-8 major cities maximum.
+"""
+        
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-exp",
+            contents=prompt
+        )
+        
+        # Parse AI response
+        ai_cities = [line.strip() for line in response.text.strip().split('\n') if line.strip()]
+        
+        # Filter original cities to match AI selection
+        filtered = []
+        for city in cities:
+            # Check if AI selected this city (case-insensitive)
+            if any(ai_city.lower() in city['name'].lower() or city['name'].lower() in ai_city.lower() 
+                   for ai_city in ai_cities):
+                filtered.append(city)
+        
+        logger.info("route.ai_verify.success", 
+                   original_count=len(cities),
+                   filtered_count=len(filtered),
+                   ai_selected=ai_cities)
+        
+        return filtered if filtered else cities[:6]  # Fallback to first 6 if AI filter fails
+        
+    except Exception as e:
+        logger.error("route.ai_verify.error", error=str(e))
+        return cities  # Return original on error
+
+
 # Major cities database for India (can be extended)
 # This is used as a fallback and for known major cities
 MAJOR_CITIES_INDIA = {
+    # Tamil Nadu - Chennai and surrounding areas
     "Chennai": {"lat": 13.0827, "lon": 80.2707, "state": "Tamil Nadu"},
+    "Adyar": {"lat": 13.0067, "lon": 80.2572, "state": "Tamil Nadu"},
+    "Ambattur": {"lat": 13.0987, "lon": 80.1610, "state": "Tamil Nadu"},
+    "Anna Nagar": {"lat": 13.0850, "lon": 80.2101, "state": "Tamil Nadu"},
+    "Avadi": {"lat": 13.1147, "lon": 80.1018, "state": "Tamil Nadu"},
+    "Egmore": {"lat": 13.0732, "lon": 80.2609, "state": "Tamil Nadu"},
+    "Guindy": {"lat": 13.0067, "lon": 80.2206, "state": "Tamil Nadu"},
+    "Kodambakkam": {"lat": 13.0524, "lon": 80.2270, "state": "Tamil Nadu"},
+    "Mylapore": {"lat": 13.0339, "lon": 80.2619, "state": "Tamil Nadu"},
+    "Nungambakkam": {"lat": 13.0594, "lon": 80.2428, "state": "Tamil Nadu"},
+    "Perambur": {"lat": 13.1105, "lon": 80.2326, "state": "Tamil Nadu"},
+    "Porur": {"lat": 13.0358, "lon": 80.1568, "state": "Tamil Nadu"},
+    "T Nagar": {"lat": 13.0418, "lon": 80.2341, "state": "Tamil Nadu"},
+    "Tambaram": {"lat": 12.9249, "lon": 80.1000, "state": "Tamil Nadu"},
+    "Velachery": {"lat": 12.9750, "lon": 80.2210, "state": "Tamil Nadu"},
+    
+    # Tamil Nadu - Coastal Cities (Chennai to Nagapattinam route)
+    "Chengalpattu": {"lat": 12.6947, "lon": 79.9837, "state": "Tamil Nadu"},
+    "Mahabalipuram": {"lat": 12.6208, "lon": 80.1989, "state": "Tamil Nadu"},
+    "Puducherry": {"lat": 11.9139, "lon": 79.8145, "state": "Puducherry"},
+    "Cuddalore": {"lat": 11.7480, "lon": 79.7714, "state": "Tamil Nadu"},
+    "Chidambaram": {"lat": 11.3991, "lon": 79.6914, "state": "Tamil Nadu"},
+    "Mayiladuthurai": {"lat": 11.1028, "lon": 79.6556, "state": "Tamil Nadu"},
+    "Nagapattinam": {"lat": 10.7660, "lon": 79.8419, "state": "Tamil Nadu"},
+    "Karaikal": {"lat": 10.9254, "lon": 79.8380, "state": "Puducherry"},
+    "Thiruvarur": {"lat": 10.7724, "lon": 79.6345, "state": "Tamil Nadu"},
+    
+    # Tamil Nadu - Other Major Cities
     "Trichy": {"lat": 10.7905, "lon": 78.7047, "state": "Tamil Nadu"},
     "Tiruchirappalli": {"lat": 10.7905, "lon": 78.7047, "state": "Tamil Nadu"},
+    "Thanjavur": {"lat": 10.7870, "lon": 79.1378, "state": "Tamil Nadu"},
     "Villupuram": {"lat": 11.9401, "lon": 79.4861, "state": "Tamil Nadu"},
     "Perambalur": {"lat": 11.2324, "lon": 78.8798, "state": "Tamil Nadu"},
     "Ariyalur": {"lat": 11.1401, "lon": 79.0766, "state": "Tamil Nadu"},
     "Salem": {"lat": 11.6643, "lon": 78.1460, "state": "Tamil Nadu"},
     "Coimbatore": {"lat": 11.0168, "lon": 76.9558, "state": "Tamil Nadu"},
     "Madurai": {"lat": 9.9252, "lon": 78.1198, "state": "Tamil Nadu"},
-    "Bangalore": {"lat": 12.9716, "lon": 77.5946, "state": "Karnataka"},
-    "Bengaluru": {"lat": 12.9716, "lon": 77.5946, "state": "Karnataka"},
+    "Vellore": {"lat": 12.9165, "lon": 79.1325, "state": "Tamil Nadu"},
+    "Kanchipuram": {"lat": 12.8342, "lon": 79.7036, "state": "Tamil Nadu"},
     "Hosur": {"lat": 12.7409, "lon": 77.8253, "state": "Tamil Nadu"},
     "Krishnagiri": {"lat": 12.5186, "lon": 78.2137, "state": "Tamil Nadu"},
     "Dharmapuri": {"lat": 12.1211, "lon": 78.1582, "state": "Tamil Nadu"},
-    "Vellore": {"lat": 12.9165, "lon": 79.1325, "state": "Tamil Nadu"},
-    "Kanchipuram": {"lat": 12.8342, "lon": 79.7036, "state": "Tamil Nadu"},
-    "Hyderabad": {"lat": 17.3850, "lon": 78.4867, "state": "Telangana"},
+    "Tindivanam": {"lat": 12.2333, "lon": 79.6500, "state": "Tamil Nadu"},
+    
+    # Maharashtra - Mumbai and surrounding areas
     "Mumbai": {"lat": 19.0760, "lon": 72.8777, "state": "Maharashtra"},
-    "Delhi": {"lat": 28.7041, "lon": 77.1025, "state": "Delhi"},
-    "Kolkata": {"lat": 22.5726, "lon": 88.3639, "state": "West Bengal"},
+    "Andheri": {"lat": 19.1136, "lon": 72.8697, "state": "Maharashtra"},
+    "Bandra": {"lat": 19.0596, "lon": 72.8295, "state": "Maharashtra"},
+    "Borivali": {"lat": 19.2403, "lon": 72.8540, "state": "Maharashtra"},
+    "Churchgate": {"lat": 18.9322, "lon": 72.8264, "state": "Maharashtra"},
+    "Dadar": {"lat": 19.0176, "lon": 72.8481, "state": "Maharashtra"},
+    "Goregaon": {"lat": 19.1653, "lon": 72.8489, "state": "Maharashtra"},
+    "Juhu": {"lat": 19.0990, "lon": 72.8266, "state": "Maharashtra"},
+    "Kandivali": {"lat": 19.2074, "lon": 72.8537, "state": "Maharashtra"},
+    "Kurla": {"lat": 19.0658, "lon": 72.8789, "state": "Maharashtra"},
+    "Malad": {"lat": 19.1859, "lon": 72.8488, "state": "Maharashtra"},
+    "Navi Mumbai": {"lat": 19.0330, "lon": 73.0297, "state": "Maharashtra"},
+    "Powai": {"lat": 19.1176, "lon": 72.9060, "state": "Maharashtra"},
+    "Thane": {"lat": 19.2183, "lon": 72.9781, "state": "Maharashtra"},
+    "Vashi": {"lat": 19.0770, "lon": 73.0169, "state": "Maharashtra"},
+    "Worli": {"lat": 19.0176, "lon": 72.8170, "state": "Maharashtra"},
+    
+    # Maharashtra - Pune and surrounding areas
     "Pune": {"lat": 18.5204, "lon": 73.8567, "state": "Maharashtra"},
+    "Hinjewadi": {"lat": 18.5912, "lon": 73.7389, "state": "Maharashtra"},
+    "Kothrud": {"lat": 18.5074, "lon": 73.8077, "state": "Maharashtra"},
+    "Wakad": {"lat": 18.5978, "lon": 73.7643, "state": "Maharashtra"},
+    "Pimpri-Chinchwad": {"lat": 18.6298, "lon": 73.7997, "state": "Maharashtra"},
+    
+    # Maharashtra - Other Major Cities
+    "Nagpur": {"lat": 21.1458, "lon": 79.0882, "state": "Maharashtra"},
+    "Nashik": {"lat": 19.9975, "lon": 73.7898, "state": "Maharashtra"},
+    "Aurangabad": {"lat": 19.8762, "lon": 75.3433, "state": "Maharashtra"},
+    "Solapur": {"lat": 17.6599, "lon": 75.9064, "state": "Maharashtra"},
+    
+    # Karnataka
+    "Bangalore": {"lat": 12.9716, "lon": 77.5946, "state": "Karnataka"},
+    "Bengaluru": {"lat": 12.9716, "lon": 77.5946, "state": "Karnataka"},
+    
+    # Telangana
+    "Hyderabad": {"lat": 17.3850, "lon": 78.4867, "state": "Telangana"},
+    
+    # Delhi
+    "Delhi": {"lat": 28.7041, "lon": 77.1025, "state": "Delhi"},
+    "New Delhi": {"lat": 28.6139, "lon": 77.2090, "state": "Delhi"},
+    
+    # West Bengal
+    "Kolkata": {"lat": 22.5726, "lon": 88.3639, "state": "West Bengal"},
+    
+    # Gujarat
     "Ahmedabad": {"lat": 23.0225, "lon": 72.5714, "state": "Gujarat"},
+    "Surat": {"lat": 21.1702, "lon": 72.8311, "state": "Gujarat"},
 }
 
 
@@ -122,19 +260,31 @@ def get_route_from_google_maps(start_city: str, end_city: str) -> Optional[List[
     Returns:
         List of waypoints with lat/lon along the route, or None if API fails
     """
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
     if not api_key:
-        logger.warning("google_maps.no_api_key")
+        logger.warning("google_maps.no_api_key", 
+                      message="Google Maps API key not configured. Set GOOGLE_MAPS_API_KEY in .env file for accurate routing.")
         return None
     
     try:
+        # Add country qualifier for better accuracy
+        origin = f"{start_city}, India"
+        destination = f"{end_city}, India"
+        
         url = "https://maps.googleapis.com/maps/api/directions/json"
         params = {
-            "origin": start_city,
-            "destination": end_city,
+            "origin": origin,
+            "destination": destination,
             "mode": "driving",
+            "region": "IN",  # Prefer Indian routes
             "key": api_key
         }
+        
+        logger.info("google_maps.requesting_route", 
+                   start=start_city, 
+                   end=end_city,
+                   origin=origin,
+                   destination=destination)
         
         response = requests.get(url, params=params, timeout=15)
         
@@ -144,6 +294,20 @@ def get_route_from_google_maps(start_city: str, end_city: str) -> Optional[List[
             if data.get("status") == "OK" and data.get("routes"):
                 route = data["routes"][0]
                 legs = route.get("legs", [])
+                
+                # Log route summary
+                if legs:
+                    leg = legs[0]
+                    distance = leg.get("distance", {}).get("text", "Unknown")
+                    duration = leg.get("duration", {}).get("text", "Unknown")
+                    start_addr = leg.get("start_address", start_city)
+                    end_addr = leg.get("end_address", end_city)
+                    
+                    logger.info("google_maps.route_summary",
+                               start_address=start_addr,
+                               end_address=end_addr,
+                               distance=distance,
+                               duration=duration)
                 
                 waypoints = []
                 for leg in legs:
@@ -161,14 +325,30 @@ def get_route_from_google_maps(start_city: str, end_city: str) -> Optional[List[
                            waypoints=len(waypoints))
                 return waypoints
             else:
+                status = data.get("status")
+                error_msg = data.get("error_message", "No route found")
                 logger.warning("google_maps.no_route", 
-                             status=data.get("status"), 
-                             error=data.get("error_message"))
+                             start=start_city,
+                             end=end_city,
+                             status=status, 
+                             error=error_msg)
+                
+                # Log available routes if status is ZERO_RESULTS
+                if status == "ZERO_RESULTS":
+                    logger.info("google_maps.zero_results_detail",
+                               message=f"No route found between {origin} and {destination}. Check city names.")
         else:
-            logger.error("google_maps.api_error", status=response.status_code)
+            logger.error("google_maps.api_error", 
+                        start=start_city,
+                        end=end_city,
+                        status=response.status_code,
+                        response=response.text[:500])
             
     except Exception as e:
-        logger.error("google_maps.exception", error=str(e))
+        logger.error("google_maps.exception", 
+                    start=start_city,
+                    end=end_city,
+                    error=str(e))
     
     return None
 
@@ -177,16 +357,17 @@ def find_cities_from_route_waypoints(
     waypoints: List[Dict[str, Any]], 
     start_city: str,
     end_city: str,
-    sample_interval: int = 10
+    sample_interval: int = 5  # Back to 5 for better coverage
 ) -> List[Dict[str, Any]]:
     """
     Find cities along the route by sampling waypoints and reverse geocoding.
+    Uses strategic sampling to capture important cities along the route.
     
     Args:
         waypoints: List of lat/lon waypoints from route
         start_city: Starting city name
         end_city: Ending city name
-        sample_interval: Sample every Nth waypoint (to avoid too many API calls)
+        sample_interval: Sample every Nth waypoint (default: 5 for good coverage)
         
     Returns:
         List of unique cities along the route
@@ -194,8 +375,25 @@ def find_cities_from_route_waypoints(
     cities = []
     seen_cities = set()
     
+    # Strategic sampling: first, quarter points, middle, three-quarter, last
+    # This ensures we catch major junction cities
+    total = len(waypoints)
+    key_indices = [
+        0,                    # Start
+        total // 5,          # 20% point
+        2 * total // 5,      # 40% point
+        3 * total // 5,      # 60% point
+        4 * total // 5,      # 80% point
+        total - 1            # End
+    ]
+    regular_indices = list(range(0, len(waypoints), sample_interval))
+    all_indices = sorted(set(key_indices + regular_indices))
+    
     # Sample waypoints to find cities
-    for i in range(0, len(waypoints), sample_interval):
+    for i in all_indices:
+        if i >= len(waypoints):
+            continue
+            
         waypoint = waypoints[i]
         lat = waypoint.get("lat")
         lon = waypoint.get("lon")
@@ -260,13 +458,14 @@ def find_cities_along_route(
         # Found actual route! Extract cities from waypoints
         logger.info("route.google_maps_success", waypoints_count=len(waypoints))
         
-        # Sample waypoints to find cities (every 10th waypoint to avoid too many API calls)
-        route_cities = find_cities_from_route_waypoints(waypoints, start_city, end_city, sample_interval=10)
+        # Sample waypoints to find cities - sample every 5th waypoint
+        route_cities = find_cities_from_route_waypoints(waypoints, start_city, end_city, sample_interval=5)
         
         # Calculate distance from start for each city
         for city in route_cities:
-            dist = calculate_distance(start_lat, start_lon, city["lat"], city["lon"])
-            city["distance_from_start"] = round(dist, 2)
+            if "distance_from_start" not in city:
+                dist = calculate_distance(start_lat, start_lon, city["lat"], city["lon"])
+                city["distance_from_start"] = round(dist, 2)
         
     else:
         # FALLBACK: Use predefined cities + straight-line interpolation
@@ -325,7 +524,16 @@ def find_cities_along_route(
     # Sort by distance from start
     route_cities.sort(key=lambda x: x["distance_from_start"])
     
-    logger.info("route.cities_found", 
+    # AI Verification: Filter to only major cities using Gemini
+    logger.info("route.cities_before_ai_filter", 
+                start=start_city, 
+                end=end_city,
+                count=len(route_cities),
+                cities=[c["name"] for c in route_cities])
+    
+    route_cities = verify_route_with_ai(start_city, end_city, route_cities)
+    
+    logger.info("route.cities_after_ai_filter", 
                 start=start_city, 
                 end=end_city,
                 count=len(route_cities),
@@ -348,6 +556,7 @@ def reverse_geocode(lat: float, lon: float) -> Optional[Dict[str, Any]]:
     """
     api_key = os.getenv("OPENWEATHER_API_KEY")
     if not api_key:
+        logger.warning("reverse_geocoding.no_api_key", lat=lat, lon=lon)
         return None
     
     try:
@@ -357,13 +566,24 @@ def reverse_geocode(lat: float, lon: float) -> Optional[Dict[str, Any]]:
         if response.status_code == 200:
             data = response.json()
             if data and len(data) > 0:
-                return {
+                location_info = {
                     "name": data[0].get("name", ""),
                     "state": data[0].get("state", ""),
                     "country": data[0].get("country", "")
                 }
+                logger.info("reverse_geocoding.success", 
+                           lat=lat, lon=lon, 
+                           location=f"{location_info['name']}, {location_info['state']}")
+                return location_info
+            else:
+                logger.warning("reverse_geocoding.no_results", lat=lat, lon=lon)
+        else:
+            logger.error("reverse_geocoding.api_error", 
+                        lat=lat, lon=lon, 
+                        status=response.status_code,
+                        response=response.text[:200])
     except Exception as e:
-        logger.warning("reverse_geocoding.failed", lat=lat, lon=lon, error=str(e))
+        logger.error("reverse_geocoding.exception", lat=lat, lon=lon, error=str(e))
     
     return None
 

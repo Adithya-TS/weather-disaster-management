@@ -21,7 +21,7 @@ logger = structlog.get_logger()
 def geocode_location(location: str) -> Optional[Dict[str, float]]:
     """
     Geocode a location (area, city, village) to get coordinates.
-    Uses OpenWeatherMap Geocoding API.
+    Uses OpenWeatherMap Geocoding API with improved accuracy.
     
     Args:
         location: Location string (e.g., "Ashok Nagar, Chennai" or "Seruvamani, Thiruvarur")
@@ -35,23 +35,44 @@ def geocode_location(location: str) -> Optional[Dict[str, float]]:
         return None
     
     try:
-        url = f"http://api.openweathermap.org/geo/1.0/direct?q={location}&limit=1&appid={api_key}"
+        # Improve location specificity by adding India if not present
+        query_location = location
+        if "india" not in location.lower() and "," not in location:
+            # If it's just a city name, add ", India" for better accuracy
+            query_location = f"{location}, India"
+        
+        url = f"http://api.openweathermap.org/geo/1.0/direct?q={query_location}&limit=5&appid={api_key}"
         response = requests.get(url, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
             if data and len(data) > 0:
+                # Try to find best match (prefer Indian locations)
+                best_match = None
+                for item in data:
+                    if item.get("country") == "IN":
+                        best_match = item
+                        break
+                
+                # If no Indian location found, use first result
+                if not best_match:
+                    best_match = data[0]
+                
                 result = {
-                    "lat": data[0].get("lat"),
-                    "lon": data[0].get("lon"),
-                    "name": data[0].get("name", location),
-                    "country": data[0].get("country", ""),
-                    "state": data[0].get("state", "")
+                    "lat": best_match.get("lat"),
+                    "lon": best_match.get("lon"),
+                    "name": best_match.get("name", location),
+                    "country": best_match.get("country", ""),
+                    "state": best_match.get("state", "")
                 }
-                logger.info("geocoding.success", location=location, lat=result["lat"], lon=result["lon"])
+                logger.info("geocoding.success", 
+                           original_location=location,
+                           resolved_location=f"{result['name']}, {result['state']}, {result['country']}",
+                           lat=result["lat"], 
+                           lon=result["lon"])
                 return result
             else:
-                logger.warning("geocoding.no_results", location=location)
+                logger.warning("geocoding.no_results", location=location, query=query_location)
                 return None
         else:
             logger.error("geocoding.error", location=location, status=response.status_code)

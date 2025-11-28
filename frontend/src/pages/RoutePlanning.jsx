@@ -65,7 +65,7 @@ const RoutePlanning = () => {
   return (
     <PageContainer
       title="Route Weather Planning"
-      description="Plan your journey with accurate weather insights using Google Maps route detection"
+      description="Plan your journey with real-time weather using Google Maps • Supports cities and neighborhoods across India"
     >
       <div className="space-y-6">
         {/* Input Form */}
@@ -80,8 +80,8 @@ const RoutePlanning = () => {
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Input
-                  label="Starting City"
-                  placeholder="e.g., Chennai"
+                  label="Starting Location"
+                  placeholder="e.g., Chennai, Guindy, Bandra"
                   value={startCity}
                   onChange={(e) => setStartCity(e.target.value)}
                   onKeyPress={(e) => {
@@ -91,8 +91,8 @@ const RoutePlanning = () => {
                   icon={<MapPin className="w-4 h-4 text-gray-400" />}
                 />
                 <Input
-                  label="Destination City"
-                  placeholder="e.g., Trichy"
+                  label="Destination Location"
+                  placeholder="e.g., Nagapattinam, Ambattur, Andheri"
                   value={endCity}
                   onChange={(e) => setEndCity(e.target.value)}
                   onKeyPress={(e) => {
@@ -137,7 +137,7 @@ const RoutePlanning = () => {
                 )}
               </div>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                🎯 Using Google Maps API for accurate route detection • Examples: Chennai → Trichy, Bangalore → Chennai, Delhi → Mumbai
+                🗺️ Using Google Maps API for real driving routes • Supports neighborhoods: Guindy → Ambattur, Bandra → Andheri
               </p>
             </div>
           </CardContent>
@@ -287,10 +287,13 @@ const RoutePlanning = () => {
             <CardContent className="p-12 text-center">
               <Navigation size={48} className="mx-auto text-gray-400 mb-4" />
               <p className="text-gray-600 dark:text-gray-400">
-                Enter start and destination cities to analyze weather along your route
+                Enter start and destination to analyze weather along your route
               </p>
               <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
-                Get weather insights for all major cities on your journey
+                📍 Supports cities & neighborhoods: Chennai, Nagapattinam, Guindy, Ambattur, Bandra, Mumbai
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
+                🗺️ Powered by Google Maps API for real driving routes
               </p>
             </CardContent>
           </Card>
