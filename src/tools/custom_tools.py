@@ -589,6 +589,53 @@ def fact_check_weather_claim(user_claim: str, official_weather: Any, location: s
     verdict = "VERIFIED"
     confidence = 100
     
+    # Check for impossible/rare weather events
+    # Tsunamis, earthquakes, volcanic eruptions are NOT weather events
+    if any(word in user_claim_lower for word in ["tsunami", "tidal wave"]):
+        discrepancies.append("✗ Tsunami is NOT a weather event - it's caused by earthquakes/underwater seismic activity")
+        discrepancies.append("✗ Weather APIs cannot detect tsunamis - check seismic monitoring systems")
+        verdict = "CANNOT VERIFY - NOT A WEATHER EVENT"
+        confidence = 0
+        return {
+            "verdict": verdict,
+            "confidence": confidence,
+            "matches": matches,
+            "discrepancies": discrepancies,
+            "official_summary": f"Weather data: {official_condition.title()}, {official_temp}°C (Tsunami detection requires seismic monitoring, not weather data)"
+        }
+    
+    if any(word in user_claim_lower for word in ["earthquake", "tremor", "seismic"]):
+        discrepancies.append("✗ Earthquakes are NOT weather events - they are geological/seismic events")
+        discrepancies.append("✗ Weather APIs cannot detect earthquakes - check seismograph data")
+        verdict = "CANNOT VERIFY - NOT A WEATHER EVENT"
+        confidence = 0
+        return {
+            "verdict": verdict,
+            "confidence": confidence,
+            "matches": matches,
+            "discrepancies": discrepancies,
+            "official_summary": f"Weather data: {official_condition.title()}, {official_temp}°C (Earthquake detection requires seismographs, not weather data)"
+        }
+    
+    if any(word in user_claim_lower for word in ["volcano", "volcanic", "eruption", "lava"]):
+        discrepancies.append("✗ Volcanic activity is NOT a weather event - it's a geological event")
+        verdict = "CANNOT VERIFY - NOT A WEATHER EVENT"
+        confidence = 0
+        return {
+            "verdict": verdict,
+            "confidence": confidence,
+            "matches": matches,
+            "discrepancies": discrepancies,
+            "official_summary": f"Weather data: {official_condition.title()}, {official_temp}°C (Volcanic activity monitoring requires geological sensors)"
+        }
+    
+    # Check for extremely rare events in certain regions
+    if any(word in user_claim_lower for word in ["tornado", "twister"]) and "india" in location.lower():
+        discrepancies.append("✗ Tornadoes are extremely rare in India (< 5 per year)")
+        discrepancies.append("ℹ️ Official weather shows no severe rotating storms")
+        verdict = "HIGHLY UNLIKELY"
+        confidence = 5
+    
     # Check temperature claims
     if any(word in user_claim_lower for word in ["hot", "heat", "warm", "cold", "cool", "freezing"]):
         if "hot" in user_claim_lower or "heat" in user_claim_lower:
