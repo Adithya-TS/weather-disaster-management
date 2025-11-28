@@ -5,6 +5,7 @@ from typing import Optional
 
 from sqlalchemy import Column, String, DateTime, Integer
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 
 from ..database.connection import Base
 
@@ -20,6 +21,9 @@ class User(Base):
     google_id = Column(String(255), unique=True, index=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Relationships
+    subscriptions = relationship("UserSubscription", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email}, name={self.name})>"

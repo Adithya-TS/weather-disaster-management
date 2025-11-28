@@ -82,6 +82,110 @@ def geocode_location(location: str) -> Optional[Dict[str, float]]:
         return None
 
 
+def get_weather_alerts(lat: float, lon: float, api_key: str) -> List[Dict[str, Any]]:
+    """
+    Get weather alerts from OpenWeatherMap One Call API.
+    
+    Args:
+        lat: Latitude
+        lon: Longitude
+        api_key: OpenWeatherMap API key
+        
+    Returns:
+        List of active weather alerts
+    """
+    try:
+        # Try to use One Call API 3.0 for alerts (requires paid plan)
+        # Fall back to checking forecast for severe conditions
+        url = f"http://api.openweathermap.org/data/2.5/onecall?lat={lat}&lon={lon}&appid={api_key}&units=metric"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            alerts = data.get("alerts", [])
+            
+            formatted_alerts = []
+            for alert in alerts:
+                formatted_alerts.append({
+                    "event": alert.get("event", "Weather Alert"),
+                    "sender": alert.get("sender_name", "Meteorological Service"),
+                    "description": alert.get("description", ""),
+                    "start": alert.get("start"),
+                    "end": alert.get("end"),
+                    "tags": alert.get("tags", [])
+                })
+            
+            return formatted_alerts
+    except Exception as e:
+        logger.debug("weather_alerts.fetch_error", error=str(e))
+    
+    return []
+
+
+def check_forecast_for_severe_conditions(lat: float, lon: float, api_key: str) -> Dict[str, Any]:
+    """
+    Check upcoming weather forecast for severe conditions.
+    
+    Args:
+        lat: Latitude
+        lon: Longitude
+        api_key: OpenWeatherMap API key
+        
+    Returns:
+        Dictionary with forecast severity analysis
+    """
+    try:
+        url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            forecasts = data.get("list", [])
+            
+            max_wind = 0
+            total_precipitation = 0
+            max_precipitation = 0
+            severe_conditions = []
+            
+            # Analyze next 24 hours (8 forecasts of 3 hours each)
+            for forecast in forecasts[:8]:
+                wind_speed = forecast.get("wind", {}).get("speed", 0) * 3.6  # m/s to km/h
+                rain_3h = forecast.get("rain", {}).get("3h", 0)
+                snow_3h = forecast.get("snow", {}).get("3h", 0)
+                precip = rain_3h + snow_3h
+                
+                max_wind = max(max_wind, wind_speed)
+                total_precipitation += precip
+                max_precipitation = max(max_precipitation, precip)
+                
+                # Check for severe weather conditions
+                weather_desc = forecast.get("weather", [{}])[0].get("description", "").lower()
+                if any(word in weather_desc for word in ["storm", "thunder", "hurricane", "cyclone", "typhoon"]):
+                    severe_conditions.append({
+                        "time": forecast.get("dt_txt"),
+                        "condition": weather_desc,
+                        "wind_speed": round(wind_speed, 1),
+                        "precipitation": round(precip, 1)
+                    })
+            
+            return {
+                "has_severe_forecast": len(severe_conditions) > 0 or max_wind > 60 or total_precipitation > 30,
+                "max_wind_24h": round(max_wind, 1),
+                "total_precipitation_24h": round(total_precipitation, 1),
+                "max_precipitation_3h": round(max_precipitation, 1),
+                "severe_conditions": severe_conditions
+            }
+    except Exception as e:
+        logger.debug("forecast_check.error", error=str(e))
+    
+    return {
+        "has_severe_forecast": False,
+        "max_wind_24h": 0,
+        "total_precipitation_24h": 0,
+        "severe_conditions": []
+    }
+
+
 def get_weather_data(location: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
     """
     Get weather data for a location (area, city, village) from OpenWeatherMap API.
@@ -133,6 +237,19 @@ def get_weather_data(location: str, start_date: Optional[str] = None, end_date: 
                     location_parts.append(geo_data["country"])
                 full_location = ", ".join(location_parts)
                 
+                # Extract precipitation data (rain in last 1h or 3h)
+                precipitation = 0.0
+                if data.get("rain"):
+                    # OpenWeatherMap returns rain volume for last 1h or 3h
+                    precipitation = data.get("rain", {}).get("1h", data.get("rain", {}).get("3h", 0))
+                elif data.get("snow"):
+                    # Also check for snow
+                    precipitation = data.get("snow", {}).get("1h", data.get("snow", {}).get("3h", 0))
+                
+                # Get weather alerts and forecast severity
+                weather_alerts = get_weather_alerts(lat, lon, api_key)
+                forecast_analysis = check_forecast_for_severe_conditions(lat, lon, api_key)
+                
                 weather_info = {
                     "success": True,
                     "location": resolved_name,
@@ -153,10 +270,13 @@ def get_weather_data(location: str, start_date: Optional[str] = None, end_date: 
                     "pressure": data.get("main", {}).get("pressure", 0),
                     "cloud_cover": data.get("clouds", {}).get("all", 0),
                     "visibility": round(data.get("visibility", 0) / 1000, 1) if data.get("visibility") else None,  # Convert to km
+                    "precipitation": round(precipitation, 1),  # Rain/snow in mm
                     "condition": data.get('weather', [{}])[0].get("main", "N/A"),
+                    "alerts": weather_alerts,  # Weather alerts
+                    "forecast_severity": forecast_analysis,  # Forecast analysis
                     "timestamp": datetime.now().isoformat()
                 }
-                logger.info("weather_data_tool.success", location=location, temp=weather_info["temperature"])
+                logger.info("weather_data_tool.success", location=location, temp=weather_info["temperature"], alerts=len(weather_alerts))
                 return weather_info
             else:
                 error_msg = f"Error: {data.get('message', 'Unknown error')}"
